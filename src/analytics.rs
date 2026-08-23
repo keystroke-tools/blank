@@ -19,6 +19,11 @@ struct RequestRecord {
     status: u16,
     duration_ms: i64,
     protocol: &'static str,
+    ip_address: Option<String>,
+    country: Option<String>,
+    device_type: &'static str,
+    user_agent: Option<String>,
+    referer: Option<String>,
 }
 
 impl Recorder {
@@ -26,7 +31,7 @@ impl Recorder {
         let (sender, mut receiver) = mpsc::unbounded_channel::<RequestRecord>();
         tokio::spawn(async move {
             while let Some(record) = receiver.recv().await {
-                if let Err(error) = sqlx::query("INSERT INTO site_request_logs (site_id, host, method, path, status, duration_ms, protocol) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                if let Err(error) = sqlx::query("INSERT INTO site_request_logs (site_id, host, method, path, status, duration_ms, protocol, ip_address, country, device_type, user_agent, referer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     .bind(record.site_id)
                     .bind(record.host)
                     .bind(record.method)
@@ -34,6 +39,8 @@ impl Recorder {
                     .bind(record.status as i64)
                     .bind(record.duration_ms)
                     .bind(record.protocol)
+                    .bind(record.ip_address).bind(record.country).bind(record.device_type)
+                    .bind(record.user_agent).bind(record.referer)
                     .execute(&db)
                     .await
                 {
@@ -68,7 +75,44 @@ impl Recorder {
             status: event.status.as_u16(),
             duration_ms: event.duration.as_millis().min(i64::MAX as u128) as i64,
             protocol,
+            ip_address: event.remote_addr.map(|address| address.ip().to_string()),
+            country: event
+                .request_headers
+                .get("cf-ipcountry")
+                .or_else(|| event.request_headers.get("x-country"))
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            device_type: device_type(
+                event
+                    .request_headers
+                    .get("user-agent")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default(),
+            ),
+            user_agent: event
+                .request_headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.chars().take(512).collect()),
+            referer: event
+                .request_headers
+                .get("referer")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.chars().take(2048).collect()),
         });
+    }
+}
+
+fn device_type(user_agent: &str) -> &'static str {
+    let ua = user_agent.to_ascii_lowercase();
+    if ua.contains("mobile") || ua.contains("android") || ua.contains("iphone") {
+        "mobile"
+    } else if ua.contains("tablet") || ua.contains("ipad") {
+        "tablet"
+    } else if ua.is_empty() {
+        "unknown"
+    } else {
+        "desktop"
     }
 }
 
@@ -78,6 +122,24 @@ struct AnalyticsResponse {
     error_requests: i64,
     average_duration_ms: f64,
     daily: Vec<DailyRow>,
+    requests: Vec<RequestRow>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct RequestRow {
+    id: i64,
+    created_at: String,
+    host: Option<String>,
+    method: String,
+    path: String,
+    status: i64,
+    duration_ms: i64,
+    protocol: String,
+    ip_address: Option<String>,
+    country: Option<String>,
+    device_type: String,
+    user_agent: Option<String>,
+    referer: Option<String>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -113,11 +175,15 @@ async fn site_analytics(
         .bind(&site_id).bind(format!("-{days} days")).fetch_one(&state.db).await.map_err(anyhow::Error::from)?.unwrap_or(0.0);
     let daily = sqlx::query_as::<_, DailyRow>("SELECT date(created_at) AS day, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, AVG(duration_ms) AS average_duration_ms FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) GROUP BY date(created_at) ORDER BY day DESC")
         .bind(&site_id).bind(format!("-{days} days")).fetch_all(&state.db).await.map_err(anyhow::Error::from)?;
+    let pattern = format!("%{}%", query.search.trim());
+    let requests = sqlx::query_as::<_, RequestRow>("SELECT id, created_at, host, method, path, status, duration_ms, protocol, ip_address, country, device_type, user_agent, referer FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) AND (? = '' OR path LIKE ? OR host LIKE ? OR method LIKE ? OR device_type LIKE ? OR country LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?")
+        .bind(&site_id).bind(format!("-{days} days")).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(query.limit.clamp(1, 200)).bind(query.offset.max(0)).fetch_all(&state.db).await.map_err(anyhow::Error::from)?;
     Ok(HttpResponse::Ok().json(AnalyticsResponse {
         total_requests,
         error_requests,
         average_duration_ms,
         daily,
+        requests,
     }))
 }
 
@@ -125,9 +191,18 @@ async fn site_analytics(
 struct DaysQuery {
     #[serde(default = "default_days")]
     days: i64,
+    #[serde(default)]
+    search: String,
+    #[serde(default = "default_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
 }
 fn default_days() -> i64 {
     30
+}
+fn default_limit() -> i64 {
+    50
 }
 
 pub fn routes(config: &mut web::ServiceConfig) {

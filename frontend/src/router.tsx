@@ -8,6 +8,7 @@ import { Dashboard } from './routes/Dashboard'
 import { NewSite } from './routes/NewSite'
 import { DeploymentPage, SitePage, SiteSettings } from './routes/SitePage'
 import { SiteConfiguration } from './routes/SiteConfiguration'
+import { SiteAnalytics } from './routes/SiteAnalytics'
 
 function Root() {
   const auth = useQuery({ queryKey: queryKeys.auth, queryFn: api.authStatus })
@@ -42,8 +43,9 @@ const newSiteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/site
 const siteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sites/$siteId', component: () => { const { siteId } = siteRoute.useParams(); return <RequireAuth><SitePage siteId={siteId} /></RequireAuth> } })
 const siteSettingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sites/$siteId/settings', component: () => { const { siteId } = siteSettingsRoute.useParams(); return <RequireAuth><SiteSettings siteId={siteId} /></RequireAuth> } })
 const siteConfigurationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sites/$siteId/configuration', component: () => { const { siteId } = siteConfigurationRoute.useParams(); return <RequireAuth><SiteConfiguration siteId={siteId} /></RequireAuth> } })
+const siteAnalyticsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sites/$siteId/analytics', component: () => { const { siteId } = siteAnalyticsRoute.useParams(); return <RequireAuth><SiteAnalytics siteId={siteId} /></RequireAuth> } })
 const deploymentRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sites/$siteId/deployments/$deploymentId', component: () => { const { siteId, deploymentId } = deploymentRoute.useParams(); return <RequireAuth><DeploymentPage siteId={siteId} deploymentId={deploymentId} /></RequireAuth> } })
 
-export const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, newSiteRoute, siteRoute, siteSettingsRoute, siteConfigurationRoute, deploymentRoute]), defaultPreload: 'intent', scrollRestoration: true })
+export const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, newSiteRoute, siteRoute, siteSettingsRoute, siteConfigurationRoute, siteAnalyticsRoute, deploymentRoute]), defaultPreload: 'intent', scrollRestoration: true })
 
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
