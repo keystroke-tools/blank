@@ -1,3 +1,4 @@
+@import "@fontsource-variable/bricolage-grotesque";
 @import "tailwindcss";
 
 @theme {
@@ -10,14 +11,15 @@
   --color-primary: #efff9a;
   --color-primary-ink: #151515;
   --color-danger: #ff7652;
-  --font-sans: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  --font-sans: "Bricolage Grotesque Variable", "Bricolage Grotesque", sans-serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
 }
 
 @layer base {
   * { border-color: var(--color-border); }
   html { color-scheme: dark; background: var(--color-background); }
-  body { margin: 0; min-width: 320px; min-height: 100vh; position: relative; background: var(--color-background); color: var(--color-ink); font-family: var(--font-mono); }
+  body { margin: 0; min-width: 320px; min-height: 100vh; position: relative; background: var(--color-background); color: var(--color-ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  h1, h2, h3 { letter-spacing: -0.025em; }
   button, input { font: inherit; }
   button { cursor: pointer; }
 }
