@@ -359,6 +359,22 @@ pub async fn check_upstream(
     Ok(HttpResponse::Ok().json(load(&state, &id).await?))
 }
 
+pub async fn renew_certificates(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> Result<HttpResponse, ApiError> {
+    require_session(&req, &state.db, true).await?;
+    let _ = site_source(&state, &id).await?;
+    state
+        .chimney
+        .reload(&state.db)
+        .await
+        .context("failed to reload Chimney certificates")?;
+    tracing::info!(site_id = %id, "requested certificate renewal");
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "reload_requested" })))
+}
+
 pub async fn export(
     req: HttpRequest,
     state: web::Data<AppState>,
@@ -383,6 +399,10 @@ pub fn routes(config: &mut web::ServiceConfig) {
         .route(
             "/sites/{id}/configuration/check-upstream",
             web::post().to(check_upstream),
+        )
+        .route(
+            "/sites/{id}/certificates/renew",
+            web::post().to(renew_certificates),
         )
         .route("/sites/{id}/configuration/export", web::get().to(export));
 }

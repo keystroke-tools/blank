@@ -29,9 +29,10 @@ export function SiteForm({ site, section = 'all' }: { site?: Site; section?: 'al
   const auth = useQuery({ queryKey: queryKeys.auth, queryFn: api.authStatus })
   const inferredName = useRef(site?.name ?? '')
   const [privateRepository, setPrivateRepository] = useState(false)
+  const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const mutation = useMutation({
     mutationFn: (input: SiteInput) => site ? api.updateSite(site.id, input, auth.data?.csrf_token ?? '') : api.createSite(input, auth.data?.csrf_token ?? ''),
-    onSuccess: async (saved) => { queryClient.setQueryData(queryKeys.site(saved.id), saved); await queryClient.invalidateQueries({ queryKey: queryKeys.sites }); if (!site) await navigate({ to: privateRepository ? '/sites/$siteId/settings' : '/sites/$siteId', params: { siteId: saved.id } }) },
+    onSuccess: async (saved) => { queryClient.setQueryData(queryKeys.site(saved.id), saved); await queryClient.invalidateQueries({ queryKey: queryKeys.sites }); setSavedMessage(site ? 'Changes saved.' : 'Site created.'); if (!site) await navigate({ to: privateRepository ? '/sites/$siteId/settings' : '/sites/$siteId', params: { siteId: saved.id } }) },
   })
   const form = useForm({ defaultValues: initial(site), onSubmit: ({ value }) => mutation.mutateAsync(value) })
   const applySuggestions = (result: Awaited<ReturnType<typeof api.detectBuild>>) => { form.setFieldValue('mise_tools', result.tools.join('\n')); form.setFieldValue('detected_framework', result.detected_framework); form.setFieldValue('install_command', result.install_command); form.setFieldValue('build_command', result.build_command); form.setFieldValue('publish_directory', result.publish_directory); form.setFieldValue('build_enabled', Boolean(result.build_command)) }
@@ -56,7 +57,7 @@ export function SiteForm({ site, section = 'all' }: { site?: Site; section?: 'al
       <form.Field name="publish_directory" validators={{ onBlur: pathRule('Publish directory') }}>{(field) => <label className="text-sm font-medium">Publish directory<input value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} className={fieldClass} /><Errors errors={field.state.meta.errors} /></label>}</form.Field>
     </section>}
     {showDomains && <section className="border border-border bg-surface p-6"><form.Field name="domains" mode="array">{(field) => <DomainEditor value={field.state.value} onChange={field.handleChange} />}</form.Field></section>}
-    {mutation.error && <p role="alert" className="border-l-2 border-danger pl-3 text-sm text-danger">{mutation.error.message}</p>}
+    {mutation.error && <p role="alert" className="border-l-2 border-danger pl-3 text-sm text-danger">{mutation.error.message}</p>}{savedMessage && <p role="status" className="border-l-2 border-primary pl-3 text-sm text-primary">{savedMessage}</p>}
     <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting] as const}>{([canSubmit, isSubmitting]) => <div className="flex justify-end"><Button type="submit" disabled={!canSubmit || isSubmitting || mutation.isPending}>{isSubmitting || mutation.isPending ? 'Saving…' : site ? 'Save changes' : 'Create site'}</Button></div>}</form.Subscribe>
   </form>
 }

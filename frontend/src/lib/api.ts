@@ -98,4 +98,5 @@ export const api = {
   updateConfiguration: (siteId: string, input: { toml: string } | { config: ChimneySite }, csrfToken: string) => request<ChimneyConfiguration>(`/sites/${siteId}/configuration`, { method: 'PUT', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(input) }),
   importConfiguration: (siteId: string, csrfToken: string) => request<ChimneyConfiguration>(`/sites/${siteId}/configuration/import`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
   checkUpstreamConfiguration: (siteId: string, csrfToken: string) => request<ChimneyConfiguration>(`/sites/${siteId}/configuration/check-upstream`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
+  renewCertificates: (siteId: string, csrfToken: string) => request<{ status: string }>(`/sites/${siteId}/certificates/renew`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
 }
