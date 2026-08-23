@@ -1,0 +1,31 @@
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { AppShell } from '../components/AppShell'
+import { Button } from '../components/Button'
+import { DomainEditor } from '../features/sites/DomainEditor'
+import { api, type ChimneySite } from '../lib/api'
+import { queryClient, queryKeys } from '../lib/query-client'
+
+export function SiteConfiguration({ siteId }: { siteId: string }) {
+  const auth = useQuery({ queryKey: queryKeys.auth, queryFn: api.authStatus })
+  const query = useQuery({ queryKey: queryKeys.configuration(siteId), queryFn: () => api.configuration(siteId) })
+  const [advanced, setAdvanced] = useState(false)
+  const [config, setConfig] = useState<ChimneySite | null>(null)
+  const [raw, setRaw] = useState('')
+  const [domains, setDomains] = useState<string[]>([])
+  useEffect(() => { if (query.data) { setConfig(query.data.config); setRaw(query.data.toml); setDomains(query.data.config.domain_names) } }, [query.data])
+  const accept = (data: Awaited<ReturnType<typeof api.configuration>>) => { queryClient.setQueryData(queryKeys.configuration(siteId), data); queryClient.invalidateQueries({ queryKey: queryKeys.site(siteId) }) }
+  const save = useMutation({ mutationFn: () => advanced ? api.updateConfiguration(siteId, { toml: raw }, auth.data?.csrf_token ?? '') : api.updateConfiguration(siteId, { config: { ...config!, domain_names: domains } }, auth.data?.csrf_token ?? ''), onSuccess: accept })
+  const importConfig = useMutation({ mutationFn: () => api.importConfiguration(siteId, auth.data?.csrf_token ?? ''), onSuccess: accept })
+  const check = useMutation({ mutationFn: () => api.checkUpstreamConfiguration(siteId, auth.data?.csrf_token ?? ''), onSuccess: accept })
+  if (query.isPending || !config) return <AppShell><main className="mx-auto max-w-4xl px-6 py-14 text-sm text-muted">Loading configuration…</main></AppShell>
+  if (query.isError) return <AppShell><main className="mx-auto max-w-4xl px-6 py-14 text-danger">{query.error.message}</main></AppShell>
+  const field = 'mt-2 h-11 w-full border border-border bg-surface px-3 outline-none focus:border-primary'
+  return <AppShell><main className="mx-auto max-w-4xl px-6 py-12"><Link to="/sites/$siteId" params={{ siteId }} className="text-sm text-muted hover:text-ink">← Site overview</Link><div className="mt-10 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Chimney</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Serving configuration</h1><p className="mt-2 text-sm text-muted">Source: {query.data.origin} · database authoritative</p></div><a href={`/api/sites/${siteId}/configuration/export`} className="text-sm font-semibold text-primary">Export chimney.toml</a></div>
+    {query.data.upstream_changed && <div className="mt-8 border-l-2 border-[#f0b45d] bg-surface px-5 py-4"><p className="font-medium">Repository chimney.toml changed since import.</p><p className="mt-1 text-sm text-muted">Your dashboard configuration remains active until you explicitly import it.</p><Button tone="quiet" className="mt-3" onClick={() => importConfig.mutate()}>Import repository version</Button></div>}
+    <div className="mt-8 flex flex-wrap gap-3"><Button tone={!advanced ? 'primary' : 'quiet'} type="button" onClick={() => setAdvanced(false)}>Structured</Button><Button tone={advanced ? 'primary' : 'quiet'} type="button" onClick={() => setAdvanced(true)}>Advanced TOML</Button><Button tone="quiet" type="button" onClick={() => importConfig.mutate()} disabled={importConfig.isPending}>{importConfig.isPending ? 'Inspecting…' : 'Import from repository'}</Button>{query.data.imported_hash && <Button tone="quiet" type="button" onClick={() => check.mutate()} disabled={check.isPending}>Check upstream</Button>}</div>
+    {!advanced ? <section className="mt-6 grid gap-5 border border-border bg-surface p-6 sm:grid-cols-2"><DomainEditor value={domains} onChange={setDomains} /><label className="text-sm font-medium">Root<input value={config.root} onChange={(e) => setConfig({ ...config, root: e.target.value })} className={field} /></label><label className="text-sm font-medium">Default index<input value={config.default_index_file ?? ''} onChange={(e) => setConfig({ ...config, default_index_file: e.target.value || null })} className={field} /></label><label className="text-sm font-medium">SPA fallback<input value={config.fallback_file ?? ''} onChange={(e) => setConfig({ ...config, fallback_file: e.target.value || null })} placeholder="index.html" className={field} /></label><label className="flex items-center gap-3 self-end pb-3 text-sm"><input type="checkbox" checked={config.https_config?.auto_redirect ?? true} onChange={(e) => setConfig({ ...config, https_config: { auto_redirect: e.target.checked, cert_file: null, key_file: null, ca_file: null } })} className="size-4 accent-primary" />Redirect HTTP to HTTPS</label></section> : <section className="mt-6"><textarea spellCheck={false} value={raw} onChange={(e) => setRaw(e.target.value)} className="min-h-[32rem] w-full border border-border bg-[#080a0d] p-5 font-mono text-sm leading-6 outline-none focus:border-primary" /></section>}
+    {(save.error || importConfig.error || check.error) && <p className="mt-5 border-l-2 border-danger pl-3 text-sm text-danger">{save.error?.message ?? importConfig.error?.message ?? check.error?.message}</p>}<div className="mt-6 flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? 'Validating…' : 'Save configuration'}</Button></div>
+  </main></AppShell>
+}

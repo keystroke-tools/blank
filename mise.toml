@@ -1,0 +1,14 @@
+[tools]
+node = "26"
+pnpm = "11"
+rust = "1.91"
+
+[tasks.dev]
+run = "cargo run"
+
+[tasks.build-frontend]
+run = "pnpm --dir frontend build"
+
+[tasks.check]
+depends = ["build-frontend"]
+run = "cargo test"

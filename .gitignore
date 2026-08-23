@@ -1,0 +1,11 @@
+/target/
+/frontend/node_modules/
+/node_modules/
+/frontend/dist/*
+!/frontend/dist/.gitkeep
+/frontend/*.tsbuildinfo
+/frontend/vite.config.js
+/frontend/vite.config.d.ts
+/.env
+/data/
+/.tmp/

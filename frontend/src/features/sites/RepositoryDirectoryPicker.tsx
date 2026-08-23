@@ -1,0 +1,16 @@
+import { Dialog } from '@base-ui/react/dialog'
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Button } from '../../components/Button'
+import { api } from '../../lib/api'
+
+export function RepositoryDirectoryPicker({ siteId, branch, value, onSelect }: { siteId: string; branch: string; value: string; onSelect: (path: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [path, setPath] = useState(value === '.' ? '' : value)
+  const tree = useQuery({ queryKey: ['repository-tree', siteId, branch, path], queryFn: () => api.repositoryTree(siteId, branch, path), enabled: open })
+  const parts = path ? path.split('/') : []
+  return <Dialog.Root open={open} onOpenChange={(next) => { setOpen(next); if (next) setPath(value === '.' ? '' : value) }}><Dialog.Trigger render={<Button type="button" tone="quiet" className="mt-2 h-8 px-3 text-xs" />}>Browse repository</Dialog.Trigger><Dialog.Portal><Dialog.Backdrop className="fixed inset-0 bg-black/75" /><Dialog.Popup className="fixed left-1/2 top-1/2 flex max-h-[min(42rem,calc(100vh-2rem))] w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col border border-border bg-surface shadow-2xl"><div className="border-b border-border p-5"><Dialog.Title className="font-semibold">Choose project directory</Dialog.Title><Dialog.Description className="mt-1 text-xs text-muted">Browsing {branch} from the repository cache.</Dialog.Description><nav className="mt-4 flex flex-wrap items-center gap-1 font-mono text-xs"><button type="button" onClick={() => setPath('')} className="text-primary">root</button>{parts.map((part, index) => <span key={`${part}-${index}`} className="flex items-center gap-1"><span className="text-muted">/</span><button type="button" onClick={() => setPath(parts.slice(0, index + 1).join('/'))} className={index === parts.length - 1 ? 'text-ink' : 'text-primary'}>{part}</button></span>)}</nav></div>
+    <div className="min-h-56 flex-1 overflow-y-auto p-3">{tree.isPending && <p className="p-3 text-sm text-muted">Loading repository…</p>}{tree.isError && <p className="p-3 text-sm text-danger">{tree.error.message}</p>}{tree.data?.map((entry) => entry.kind === 'tree' ? <button key={entry.path} type="button" onClick={() => setPath(entry.path)} className="flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left text-sm hover:bg-surface-muted hover:text-primary"><span aria-hidden="true">▸</span><span>{entry.name}</span></button> : <div key={entry.path} className="flex items-center gap-3 border-b border-border px-3 py-3 text-sm text-muted"><span aria-hidden="true">·</span><span>{entry.name}</span></div>)}</div>
+    <div className="flex items-center justify-between gap-4 border-t border-border p-4"><span className="truncate font-mono text-xs text-muted">{path || '.'}</span><div className="flex gap-2"><Dialog.Close render={<Button type="button" tone="quiet" />}>Cancel</Dialog.Close><Button type="button" onClick={() => { onSelect(path || '.'); setOpen(false) }}>Choose directory</Button></div></div>
+  </Dialog.Popup></Dialog.Portal></Dialog.Root>
+}

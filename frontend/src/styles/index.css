@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #151515;
+  --color-surface: #1b1b1b;
+  --color-surface-muted: #242424;
+  --color-border: #383838;
+  --color-ink: #f4f1ed;
+  --color-muted: #9d9994;
+  --color-primary: #efff9a;
+  --color-primary-ink: #151515;
+  --color-danger: #ff7652;
+  --font-sans: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html { color-scheme: dark; background: var(--color-background); }
+  body { margin: 0; min-width: 320px; min-height: 100vh; position: relative; background: var(--color-background); color: var(--color-ink); font-family: var(--font-mono); }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+}
+
+#root { min-height: 100vh; isolation: isolate; }
