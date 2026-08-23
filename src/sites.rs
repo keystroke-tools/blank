@@ -19,6 +19,8 @@ struct SiteRow {
     repository_url: String,
     branch: String,
     project_directory: String,
+    mise_tools: String,
+    detected_framework: Option<String>,
     install_command: Option<String>,
     build_command: Option<String>,
     publish_directory: String,
@@ -43,6 +45,10 @@ pub struct SiteInput {
     branch: String,
     #[serde(default = "default_project_directory")]
     project_directory: String,
+    #[serde(default)]
+    mise_tools: String,
+    #[serde(default)]
+    detected_framework: Option<String>,
     install_command: Option<String>,
     build_command: Option<String>,
     #[serde(default = "default_publish_directory")]
@@ -98,6 +104,27 @@ fn normalized_domains(domains: &[String]) -> Result<Vec<String>, ApiError> {
     Ok(result)
 }
 
+pub(crate) fn normalized_mise_tools(value: &str) -> Result<String, ApiError> {
+    let tools: Vec<_> = value
+        .split(|character: char| character.is_whitespace() || character == ',')
+        .filter(|tool| !tool.is_empty())
+        .collect();
+    if tools.len() > 20
+        || tools.iter().any(|tool| {
+            tool.len() > 200
+                || tool.starts_with('-')
+                || tool.chars().any(|character| {
+                    character.is_control() || matches!(character, '\'' | '"' | '`' | '$' | ';')
+                })
+        })
+    {
+        return Err(ApiError::BadRequest(
+            "dependencies must contain at most 20 valid specifications".into(),
+        ));
+    }
+    Ok(tools.join("\n"))
+}
+
 fn validate(input: &SiteInput) -> Result<Vec<String>, ApiError> {
     let name = input.name.trim();
     if name.is_empty() || name.len() > 100 || name.chars().any(char::is_control) {
@@ -112,6 +139,14 @@ fn validate(input: &SiteInput) -> Result<Vec<String>, ApiError> {
         .map_err(|_| ApiError::BadRequest("invalid repository URL".into()))?;
     validate_branch(input.branch.trim())
         .map_err(|_| ApiError::BadRequest("invalid branch name".into()))?;
+    normalized_mise_tools(&input.mise_tools)?;
+    if input
+        .detected_framework
+        .as_ref()
+        .is_some_and(|framework| framework.len() > 100 || framework.chars().any(char::is_control))
+    {
+        return Err(ApiError::BadRequest("invalid detected framework".into()));
+    }
     for (label, path) in [
         ("project directory", input.project_directory.trim()),
         ("publish directory", input.publish_directory.trim()),
@@ -140,7 +175,7 @@ async fn domains_for(state: &AppState, site_id: &str) -> Result<Vec<String>, Api
 }
 
 async fn load_site(state: &AppState, id: &str) -> Result<Site, ApiError> {
-    let row = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites WHERE id = ?")
+    let row = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites WHERE id = ?")
         .bind(id).fetch_optional(&state.db).await.context("failed to load site")?
         .ok_or_else(|| ApiError::NotFound("site not found".into()))?;
     let domains = domains_for(state, id).await?;
@@ -182,7 +217,7 @@ async fn replace_domains(
 
 pub async fn list(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, false).await?;
-    let rows = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites ORDER BY name")
+    let rows = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites ORDER BY name")
         .fetch_all(&state.db).await.context("failed to list sites")?;
     let mut sites = Vec::with_capacity(rows.len());
     for row in rows {
@@ -214,9 +249,9 @@ pub async fn create(
         .begin()
         .await
         .context("failed to begin site creation")?;
-    let result = sqlx::query("INSERT INTO sites (id, name, repository_url, branch, project_directory, install_command, build_command, publish_directory, build_enabled, auto_deploy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    let result = sqlx::query("INSERT INTO sites (id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&id).bind(input.name.trim()).bind(input.repository_url.trim()).bind(input.branch.trim())
-        .bind(input.project_directory.trim()).bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command))
+        .bind(input.project_directory.trim()).bind(normalized_mise_tools(&input.mise_tools)?).bind(clean_optional(&input.detected_framework)).bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command))
         .bind(input.publish_directory.trim()).bind(input.build_enabled).bind(input.auto_deploy).execute(&mut *tx).await;
     if let Err(error) = result {
         if error
@@ -252,9 +287,9 @@ pub async fn update(
         .begin()
         .await
         .context("failed to begin site update")?;
-    let result = sqlx::query("UPDATE sites SET name = ?, repository_url = ?, branch = ?, project_directory = ?, install_command = ?, build_command = ?, publish_directory = ?, build_enabled = ?, auto_deploy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    let result = sqlx::query("UPDATE sites SET name = ?, repository_url = ?, branch = ?, project_directory = ?, mise_tools = ?, detected_framework = ?, install_command = ?, build_command = ?, publish_directory = ?, build_enabled = ?, auto_deploy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(input.name.trim()).bind(input.repository_url.trim()).bind(input.branch.trim()).bind(input.project_directory.trim())
-        .bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command)).bind(input.publish_directory.trim())
+        .bind(normalized_mise_tools(&input.mise_tools)?).bind(clean_optional(&input.detected_framework)).bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command)).bind(input.publish_directory.trim())
         .bind(input.build_enabled).bind(input.auto_deploy).bind(id.as_str()).execute(&mut *tx).await;
     let result = match result {
         Ok(result) => result,
@@ -332,6 +367,8 @@ mod tests {
             repository_url: "https://example.com/docs.git".into(),
             branch: "main".into(),
             project_directory: project.into(),
+            mise_tools: String::new(),
+            detected_framework: None,
             install_command: None,
             build_command: None,
             publish_directory: publish.into(),

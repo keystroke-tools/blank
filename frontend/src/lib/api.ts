@@ -13,6 +13,8 @@ export type Site = {
   repository_url: string
   branch: string
   project_directory: string
+  mise_tools: string
+  detected_framework: string | null
   install_command: string | null
   build_command: string | null
   publish_directory: string
@@ -29,6 +31,7 @@ export type RemoteInspection = { default_branch: string | null; branches: string
 export type CommitMetadata = { sha: string; message: string; author_name: string; author_email: string; authored_at: string }
 export type RepositoryRefresh = { inspection: RemoteInspection; commit: CommitMetadata }
 export type BuildSuggestions = { repository_mise: boolean; tools: string[]; install_command: string | null; build_command: string | null; publish_directory: string; detected_framework: string | null }
+export type MiseToolValidation = { tool: string; valid: boolean; resolved_version: string | null; error: string | null }
 export type Deployment = { id: string; site_id: string; commit_sha: string | null; commit_message: string | null; commit_author: string | null; status: string; triggered_by: string; build_settings_snapshot: string; config_snapshot: string | null; release_path: string | null; error_summary: string | null; log: string; created_at: string; started_at: string | null; finished_at: string | null; rollback_of_deployment_id: string | null }
 export type DnsResult = { domain: string; addresses: string[]; canonical_names: string[]; matches_expected: boolean | null; error: string | null }
 export type RepositoryEntry = { name: string; path: string; kind: 'tree' | 'blob' | string }
@@ -79,6 +82,8 @@ export const api = {
   refreshRepository: (siteId: string, csrfToken: string) => request<RepositoryRefresh>(`/sites/${siteId}/repository/refresh`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
   repositoryTree: (siteId: string, branch: string, path: string) => request<RepositoryEntry[]>(`/sites/${siteId}/repository/tree?branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path === '.' ? '' : path)}`),
   detectBuild: (siteId: string, csrfToken: string) => request<BuildSuggestions>(`/sites/${siteId}/repository/detect`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
+  detectDraftBuild: (input: { repository_url: string; branch: string; project_directory: string }, csrfToken: string) => request<BuildSuggestions>('/repositories/detect', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(input) }),
+  validateMiseTool: (tool: string, csrfToken: string) => request<MiseToolValidation>('/mise/tools/validate', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ tool }) }),
   deployments: (siteId: string) => request<Deployment[]>(`/sites/${siteId}/deployments`),
   deployment: (id: string) => request<Deployment>(`/deployments/${id}`),
   createDeployment: (siteId: string, csrfToken: string) => request<Deployment>(`/sites/${siteId}/deployments`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),

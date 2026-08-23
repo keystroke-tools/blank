@@ -2,6 +2,8 @@ use actix_web::{HttpRequest, HttpResponse, web};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::{path::PathBuf, process::Stdio, time::Duration};
+use tokio::process::Command;
 
 use crate::{
     auth::require_session,
@@ -37,6 +39,90 @@ struct TreeQuery {
 #[derive(Serialize)]
 struct DeployKey {
     public_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ValidateMiseToolInput {
+    tool: String,
+}
+
+#[derive(Serialize)]
+struct MiseToolValidation {
+    tool: String,
+    valid: bool,
+    resolved_version: Option<String>,
+    error: Option<String>,
+}
+
+async fn validate_mise_tool(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    input: web::Json<ValidateMiseToolInput>,
+) -> Result<HttpResponse, ApiError> {
+    require_session(&req, &state.db, true).await?;
+    let tool = input.tool.trim().to_owned();
+    let normalized = crate::sites::normalized_mise_tools(&tool)?;
+    if normalized.is_empty() || normalized.contains('\n') {
+        return Err(ApiError::BadRequest(
+            "provide exactly one dependency specification".into(),
+        ));
+    }
+    let Some(mise) = state.config.mise_bin.as_deref() else {
+        return Ok(HttpResponse::Ok().json(MiseToolValidation {
+            tool,
+            valid: false,
+            resolved_version: None,
+            error: Some("dependency validation is unavailable on the Blank server".into()),
+        }));
+    };
+    let path = std::env::join_paths([
+        mise.parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/usr/local/bin")),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+    ])
+    .context("failed to construct Mise validation path")?;
+    let mut command = Command::new(mise);
+    command
+        .args(["--no-config", "latest", normalized.as_str()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", state.config.data_dir.join("state/build-home"))
+        .env("MISE_DATA_DIR", state.config.data_dir.join("state/mise"))
+        .env(
+            "MISE_CONFIG_DIR",
+            state.config.data_dir.join("state/mise-config"),
+        )
+        .env("MISE_YES", "1");
+    let output = match tokio::time::timeout(Duration::from_secs(20), command.output()).await {
+        Ok(result) => result.context("failed to run Mise validation")?,
+        Err(_) => {
+            return Ok(HttpResponse::Ok().json(MiseToolValidation {
+                tool,
+                valid: false,
+                resolved_version: None,
+                error: Some("dependency validation timed out".into()),
+            }));
+        }
+    };
+    let resolved = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let valid = output.status.success() && !resolved.is_empty();
+    Ok(HttpResponse::Ok().json(MiseToolValidation {
+        tool,
+        valid,
+        resolved_version: valid.then_some(resolved),
+        error: (!valid).then_some(if error.is_empty() {
+            "this dependency or version could not be resolved".into()
+        } else {
+            error
+        }),
+    }))
 }
 
 async fn ensure_site(state: &AppState, id: &str) -> Result<(), ApiError> {
@@ -192,6 +278,7 @@ pub async fn delete_deploy_key(
 pub fn routes(config: &mut web::ServiceConfig) {
     config
         .route("/repositories/inspect", web::post().to(inspect))
+        .route("/mise/tools/validate", web::post().to(validate_mise_tool))
         .route("/sites/{id}/repository/refresh", web::post().to(refresh))
         .route("/sites/{id}/repository/tree", web::get().to(tree))
         .route(

@@ -31,10 +31,195 @@ Active deployment logs stream to the browser over resumable Server-Sent Events. 
 
 Successful historical deployments can be rolled back without rebuilding. Blank atomically switches to the retained release while preserving the site's current Chimney configuration. It keeps five successful releases by default; configure this with `BLANK_RELEASE_RETENTION`.
 
-In site settings, **Detect settings** recognizes common Node projects and package managers from `package.json`, version files, Mise files, and npm, pnpm, Yarn, or Bun lockfiles. The result is only a suggestion: review it and save the form before deploying. Repository Mise configuration takes precedence over generated tool selections.
+In site settings, **Detect settings** recognizes common Node projects and package managers from `package.json`, version files, Mise files, and npm, pnpm, Yarn, or Bun lockfiles. The result is only a suggestion: review it and save the form before deploying. An explicitly saved **Mise tools** list takes precedence over generated tool selections.
 
 ## Repository access
 
 Blank uses the installed Git CLI and keeps one bare cache per site under its data directory. Public repositories work directly. For a private SSH repository, generate an Ed25519 deploy key from the site's settings, add the displayed public key to the Git provider as a read-only deploy key, then fetch the repository from Blank.
 
 Private keys never leave the server and are stored with mode `0600`. Blank disables interactive Git credential prompts and keeps SSH known-host state inside its own data directory.
+
+## Production deployment
+
+Blank is distributed as one binary with the dashboard assets embedded in it. The server needs Linux, Git, OpenSSH's `ssh-keygen`, and Mise at runtime. Build the frontend before the Rust release binary so the current frontend is embedded:
+
+```sh
+git clone https://github.com/keystroke-tools/blank.git
+cd blank
+mise install
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend build
+cargo build --release --locked
+```
+
+Install the binary and create a dedicated, non-login service account. Install Mise at a system-wide path such as `/usr/local/bin/mise`; repository builds run as the `blank` user and must be able to execute it.
+
+```sh
+sudo useradd --system --home-dir /var/lib/blank --create-home --shell /usr/sbin/nologin blank
+sudo install -o root -g root -m 0755 target/release/blank /usr/local/bin/blank
+sudo install -d -o blank -g blank -m 0750 /var/lib/blank
+sudo install -d -o syslog -g adm -m 0750 /var/log/blank
+```
+
+Create `/etc/blank.env`:
+
+```ini
+BLANK_BIND=127.0.0.1:8080
+BLANK_CHIMNEY_BIND=127.0.0.1:8081
+BLANK_DATA_DIR=/var/lib/blank
+BLANK_MISE_BIN=/usr/local/bin/mise
+BLANK_SECURE_COOKIES=true
+BLANK_RELEASE_RETENTION=5
+BLANK_EXPECTED_IPS=203.0.113.10
+RUST_LOG=blank=info,actix_web=info
+```
+
+Protect this file if it later contains environment-specific secrets:
+
+```sh
+sudo chown root:blank /etc/blank.env
+sudo chmod 0640 /etc/blank.env
+```
+
+`BLANK_EXPECTED_IPS` is a comma-separated list used by domain checks. Set it to the public addresses that should receive site traffic. Keep `BLANK_SECURE_COOKIES=true` when the dashboard is served over HTTPS.
+
+### systemd
+
+Create `/etc/systemd/system/blank.service`:
+
+```ini
+[Unit]
+Description=Blank deployment platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blank
+Group=blank
+WorkingDirectory=/var/lib/blank
+EnvironmentFile=/etc/blank.env
+ExecStart=/usr/local/bin/blank
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+SyslogIdentifier=blank
+StandardOutput=journal
+StandardError=journal
+
+# Blank deliberately executes repository build commands as this user.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/blank
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it and inspect the initial startup:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now blank
+sudo systemctl status blank
+sudo journalctl -u blank -f
+```
+
+Database migrations run automatically at startup. Back up `/var/lib/blank` before replacing the binary, then restart the service:
+
+```sh
+sudo systemctl stop blank
+sudo cp -a /var/lib/blank /var/lib/blank.backup
+sudo install -o root -g root -m 0755 target/release/blank /usr/local/bin/blank
+sudo systemctl start blank
+```
+
+### Daily log files
+
+systemd continues to send output to the journal, while rsyslog can additionally route Blank records into files named by the date on which each record arrives. Create `/etc/rsyslog.d/30-blank.conf`:
+
+```text
+template(
+  name="BlankDailyFile"
+  type="string"
+  string="/var/log/blank/%timegenerated:::date-year%-%timegenerated:::date-month%-%timegenerated:::date-day%.log"
+)
+
+if ($programname == "blank") then {
+  action(
+    type="omfile"
+    dynaFile="BlankDailyFile"
+    createDirs="on"
+    dirCreateMode="0750"
+    fileCreateMode="0640"
+  )
+  stop
+}
+```
+
+Validate and reload rsyslog:
+
+```sh
+sudo rsyslogd -N1
+sudo systemctl restart rsyslog
+sudo systemctl restart blank
+sudo tail -f /var/log/blank/$(date +%F).log
+```
+
+This produces files such as `/var/log/blank/2026-08-23.log` and rolls to a new path at midnight without restarting Blank. The configuration assumes rsyslog is already receiving systemd journal records, as it does on common Debian and Ubuntu installations. If no file appears, verify that rsyslog's `imjournal` input or journald-to-syslog forwarding is enabled before changing the Blank service.
+
+Because the date is already part of each filename, use systemd-tmpfiles for retention rather than rotating a file that Blank or rsyslog still has open. Create `/etc/tmpfiles.d/blank-logs.conf` to remove logs older than 30 days:
+
+```text
+d /var/log/blank 0750 syslog adm 30d
+```
+
+Test the cleanup rule without deleting anything, then let the normal systemd timer enforce it:
+
+```sh
+sudo systemd-tmpfiles --clean --dry-run /etc/tmpfiles.d/blank-logs.conf
+```
+
+### Public routing and TLS
+
+The dashboard/API and deployed sites intentionally use separate internal listeners:
+
+- `127.0.0.1:8080` serves the Blank dashboard and API.
+- `127.0.0.1:8081` serves deployed sites through Chimney, selected by the request hostname.
+
+Put both behind a public reverse proxy. Route only the dashboard hostname, such as `blank.example.com`, to port `8080`; route hosted-site hostnames to port `8081`. The proxy should preserve the original `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto` headers, support streaming responses for deployment logs, and terminate TLS. Do not expose port `8080` directly to the internet.
+
+For example, the essential Nginx routing shape is:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name blank.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Supply appropriate certificates and an HTTP-to-HTTPS redirect using your normal Nginx or ACME setup. A default TLS server can only serve hostnames covered by its configured certificates; use explicit site blocks, a wildcard certificate, or automated certificate provisioning as appropriate for your domains.

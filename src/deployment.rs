@@ -7,14 +7,14 @@ use std::{
 use actix_web::{HttpRequest, HttpResponse, http::header, web};
 use anyhow::{Context, Result, bail};
 use futures_util::stream;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::{
     auth::require_session,
-    detection::{BuildSuggestions, detect},
+    detection::{BuildSuggestions, detect_within},
     error::ApiError,
     state::AppState,
 };
@@ -75,6 +75,7 @@ struct SiteBuild {
     repository_url: String,
     branch: String,
     project_directory: String,
+    mise_tools: String,
     install_command: Option<String>,
     build_command: Option<String>,
     publish_directory: String,
@@ -89,7 +90,7 @@ pub async fn create(
     require_session(&req, &state.db, true).await?;
     let site = load_site(&state, &site_id).await?;
     let id = Uuid::new_v4().to_string();
-    let snapshot = serde_json::to_string(&serde_json::json!({"project_directory":site.project_directory,"install_command":site.install_command,"build_command":site.build_command,"publish_directory":site.publish_directory,"build_enabled":site.build_enabled})).unwrap();
+    let snapshot = serde_json::to_string(&serde_json::json!({"project_directory":site.project_directory,"mise_tools":site.mise_tools,"install_command":site.install_command,"build_command":site.build_command,"publish_directory":site.publish_directory,"build_enabled":site.build_enabled})).unwrap();
     let config_snapshot: Option<String> =
         sqlx::query_scalar("SELECT config_json FROM site_chimney_configs WHERE site_id = ?")
             .bind(site_id.as_str())
@@ -174,9 +175,30 @@ async fn build_and_activate(
     if !project.starts_with(&root) {
         bail!("project directory escapes repository worktree")
     }
-    let suggestions = detect(&project).await?;
+    let mut suggestions = detect_within(&project, &root).await?;
+    if let Some(framework) = suggestions.detected_framework.as_deref() {
+        sqlx::query("UPDATE sites SET detected_framework = ? WHERE id = ?")
+            .bind(framework)
+            .bind(&site.id)
+            .execute(&state.db)
+            .await?;
+    }
+    let configured_tools: Vec<String> = site
+        .mise_tools
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    if !configured_tools.is_empty() {
+        suggestions.tools = configured_tools;
+    }
     if site.build_enabled {
-        transition(state, id, Status::InstallingTools, "Installing Mise tools").await?;
+        transition(
+            state,
+            id,
+            Status::InstallingTools,
+            "Installing dependencies",
+        )
+        .await?;
         if project.join("mise.toml").exists() {
             run_process(
                 state,
@@ -311,7 +333,7 @@ async fn run_process_inner(
             .config
             .mise_bin
             .as_deref()
-            .context("Mise executable was not found; install Mise or set BLANK_MISE_BIN")?
+            .context("dependency installer is unavailable on the Blank server")?
     } else {
         Path::new(program)
     };
@@ -342,6 +364,9 @@ async fn run_process_inner(
         )
         .env("CI", "true")
         .env("MISE_YES", "1");
+    if let Some(parent) = directory.parent() {
+        command.env("MISE_CEILING_PATHS", parent);
+    }
     if isolate_package_workspace {
         command.env("NPM_CONFIG_IGNORE_WORKSPACE", "true");
     }
@@ -506,7 +531,7 @@ async fn fail(state: &AppState, id: &str, message: &str) {
     tracing::error!(deployment_id = id, error = message, "deployment failed");
 }
 async fn load_site(state: &AppState, id: &str) -> Result<SiteBuild, ApiError> {
-    sqlx::query_as("SELECT id,repository_url,branch,project_directory,install_command,build_command,publish_directory,build_enabled FROM sites WHERE id=?").bind(id).fetch_optional(&state.db).await.context("failed to load site")?.ok_or_else(||ApiError::NotFound("site not found".into()))
+    sqlx::query_as("SELECT id,repository_url,branch,project_directory,mise_tools,install_command,build_command,publish_directory,build_enabled FROM sites WHERE id=?").bind(id).fetch_optional(&state.db).await.context("failed to load site")?.ok_or_else(||ApiError::NotFound("site not found".into()))
 }
 async fn get_deployment(state: &AppState, id: &str) -> Result<Deployment, ApiError> {
     sqlx::query_as("SELECT id,site_id,commit_sha,commit_message,commit_author,status,triggered_by,build_settings_snapshot,config_snapshot,release_path,error_summary,log,created_at,started_at,finished_at,rollback_of_deployment_id FROM deployments WHERE id=?").bind(id).fetch_optional(&state.db).await.context("failed to load deployment")?.ok_or_else(||ApiError::NotFound("deployment not found".into()))
@@ -708,7 +733,7 @@ pub async fn suggestions(
         .await
         .context("project directory does not exist")?;
     let result = if project.starts_with(&root) {
-        detect(&project).await
+        detect_within(&project, &root).await
     } else {
         Err(anyhow::anyhow!(
             "project directory escapes repository worktree"
@@ -719,8 +744,74 @@ pub async fn suggestions(
         .context("failed to clean detection worktree")?;
     Ok(HttpResponse::Ok().json(result?))
 }
+
+#[derive(Deserialize)]
+pub struct DraftSuggestionsInput {
+    repository_url: String,
+    branch: String,
+    #[serde(default = "default_project_directory")]
+    project_directory: String,
+}
+
+fn default_project_directory() -> String {
+    ".".into()
+}
+
+pub async fn draft_suggestions(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    input: web::Json<DraftSuggestionsInput>,
+) -> Result<HttpResponse, ApiError> {
+    require_session(&req, &state.db, true).await?;
+    let cache_id = format!("draft-{}", Uuid::new_v4());
+    let result = async {
+        state
+            .git
+            .fetch(&cache_id, input.repository_url.trim())
+            .await
+            .map_err(|error| ApiError::BadRequest(format!("repository fetch failed: {error}")))?;
+        let commit = state
+            .git
+            .resolve_commit(&cache_id, input.branch.trim())
+            .await
+            .map_err(|error| ApiError::BadRequest(format!("branch resolution failed: {error}")))?;
+        let worktree_id = format!("detect-{}", Uuid::new_v4());
+        let worktree = state
+            .git
+            .create_worktree(&cache_id, &worktree_id, &commit.sha)
+            .await
+            .map_err(|error| {
+                ApiError::BadRequest(format!("repository checkout failed: {error}"))
+            })?;
+        let root = tokio::fs::canonicalize(worktree.path())
+            .await
+            .context("failed to resolve detection worktree")?;
+        let project = tokio::fs::canonicalize(worktree.path().join(input.project_directory.trim()))
+            .await
+            .map_err(|_| ApiError::BadRequest("project directory does not exist".into()))?;
+        if !project.starts_with(&root) {
+            return Err(ApiError::BadRequest(
+                "project directory escapes repository worktree".into(),
+            ));
+        }
+        let suggestions = detect_within(&project, &root)
+            .await
+            .map_err(|error| ApiError::BadRequest(format!("build detection failed: {error}")))?;
+        worktree
+            .remove()
+            .await
+            .context("failed to clean detection worktree")?;
+        Ok(HttpResponse::Ok().json(suggestions))
+    }
+    .await;
+    if let Err(error) = state.git.delete_site_data(&cache_id).await {
+        tracing::warn!(%error, "failed to remove draft repository cache");
+    }
+    result
+}
 pub fn routes(config: &mut web::ServiceConfig) {
     config
+        .route("/repositories/detect", web::post().to(draft_suggestions))
         .route("/sites/{id}/deployments", web::get().to(list))
         .route("/sites/{id}/deployments", web::post().to(create))
         .route("/sites/{id}/repository/detect", web::post().to(suggestions))

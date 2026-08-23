@@ -1,0 +1,1 @@
+ALTER TABLE sites ADD COLUMN mise_tools TEXT NOT NULL DEFAULT '';

@@ -30,7 +30,7 @@ struct Engines {
     node: Option<String>,
 }
 
-pub async fn detect(project: &Path) -> Result<BuildSuggestions> {
+pub async fn detect_within(project: &Path, repository_root: &Path) -> Result<BuildSuggestions> {
     let mut result = BuildSuggestions {
         publish_directory: "dist".into(),
         ..Default::default()
@@ -61,34 +61,21 @@ pub async fn detect(project: &Path) -> Result<BuildSuggestions> {
     if !result.repository_mise {
         result.tools.push(format!("node@{node_version}"));
     }
-    let manager = package
-        .package_manager
-        .as_deref()
-        .and_then(|value| value.split_once('@'))
-        .map(|(name, version)| (name, Some(version)))
-        .or_else(|| {
-            if project.join("pnpm-lock.yaml").exists() {
-                Some(("pnpm", None))
-            } else if project.join("yarn.lock").exists() {
-                Some(("yarn", None))
-            } else if project.join("bun.lock").exists() || project.join("bun.lockb").exists() {
-                Some(("bun", None))
-            } else {
-                Some(("npm", None))
-            }
-        });
-    let (manager, mut version) = manager.unwrap();
+    let (manager, mut version, manager_directory) =
+        find_package_manager(project, repository_root, package.package_manager.as_deref()).await;
     if manager == "pnpm" && version.is_none() {
-        version = Some(inferred_pnpm_version(project).await);
+        version = Some(inferred_pnpm_version(&manager_directory).await.into());
     }
-    result.isolate_package_workspace = manager == "pnpm" && !repository_has_pnpm_workspace(project);
+    result.isolate_package_workspace =
+        manager == "pnpm" && !repository_has_pnpm_workspace(&manager_directory, repository_root);
     if !result.repository_mise && manager != "npm" {
-        result
-            .tools
-            .push(format!("{manager}@{}", version.unwrap_or("latest")));
+        result.tools.push(format!(
+            "{manager}@{}",
+            version.as_deref().unwrap_or("latest")
+        ));
     }
     result.install_command = Some(
-        match manager {
+        match manager.as_str() {
             "pnpm" => "pnpm install --frozen-lockfile",
             "yarn" => "yarn install --immutable",
             "bun" => "bun install --frozen-lockfile",
@@ -123,6 +110,48 @@ pub async fn detect(project: &Path) -> Result<BuildSuggestions> {
     Ok(result)
 }
 
+async fn find_package_manager(
+    project: &Path,
+    repository_root: &Path,
+    local_package_manager: Option<&str>,
+) -> (String, Option<String>, std::path::PathBuf) {
+    let mut directory = project.to_path_buf();
+    let mut declared = local_package_manager.map(str::to_owned);
+    loop {
+        if declared.is_none() && directory != project {
+            declared = tokio::fs::read(directory.join("package.json"))
+                .await
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<PackageJson>(&bytes).ok())
+                .and_then(|package| package.package_manager);
+        }
+        if let Some(value) = declared.as_deref() {
+            let (name, version) = value
+                .split_once('@')
+                .map(|(name, version)| (name, Some(version.to_owned())))
+                .unwrap_or((value, None));
+            return (name.to_owned(), version, directory);
+        }
+        for (file, manager) in [
+            ("pnpm-lock.yaml", "pnpm"),
+            ("yarn.lock", "yarn"),
+            ("bun.lock", "bun"),
+            ("bun.lockb", "bun"),
+            ("package-lock.json", "npm"),
+        ] {
+            if directory.join(file).exists() {
+                return (manager.into(), None, directory);
+            }
+        }
+        if directory == repository_root
+            || !directory.pop()
+            || !directory.starts_with(repository_root)
+        {
+            return ("npm".into(), None, project.to_path_buf());
+        }
+    }
+}
+
 async fn inferred_pnpm_version(project: &Path) -> &'static str {
     let lockfile = tokio::fs::read_to_string(project.join("pnpm-lock.yaml"))
         .await
@@ -144,10 +173,13 @@ async fn inferred_pnpm_version(project: &Path) -> &'static str {
     }
 }
 
-fn repository_has_pnpm_workspace(project: &Path) -> bool {
+fn repository_has_pnpm_workspace(project: &Path, repository_root: &Path) -> bool {
     for directory in project.ancestors() {
         if directory.join("pnpm-workspace.yaml").exists() {
             return true;
+        }
+        if directory == repository_root {
+            break;
         }
         if directory.join(".git").exists() {
             break;
@@ -203,7 +235,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let result = detect(directory.path()).await.unwrap();
+        let result = detect_within(directory.path(), directory.path())
+            .await
+            .unwrap();
         assert_eq!(result.tools, ["node@24", "pnpm@10.0.0"]);
         assert_eq!(
             result.install_command.as_deref(),
@@ -229,7 +263,37 @@ mod tests {
         )
         .await
         .unwrap();
-        let result = detect(directory.path()).await.unwrap();
+        let result = detect_within(directory.path(), directory.path())
+            .await
+            .unwrap();
         assert_eq!(result.tools, ["node@24", "pnpm@9"]);
+    }
+
+    #[tokio::test]
+    async fn finds_monorepo_package_manager_without_inheriting_root_mise() {
+        let repository = tempfile::tempdir().unwrap();
+        let project = repository.path().join("apps/web");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        tokio::fs::write(repository.path().join("mise.toml"), "[tools]\npnpm = '11'")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            repository.path().join("pnpm-lock.yaml"),
+            "lockfileVersion: '9.0'",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            project.join("package.json"),
+            r#"{"scripts":{"build":"vite build"},"devDependencies":{"vite":"latest"}}"#,
+        )
+        .await
+        .unwrap();
+
+        let result = detect_within(&project, repository.path()).await.unwrap();
+
+        assert!(!result.repository_mise);
+        assert_eq!(result.tools, ["node@24", "pnpm@9"]);
+        assert_eq!(result.build_command.as_deref(), Some("pnpm run build"));
     }
 }
