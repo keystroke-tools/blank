@@ -123,6 +123,9 @@ struct AnalyticsResponse {
     average_duration_ms: f64,
     daily: Vec<DailyRow>,
     requests: Vec<RequestRow>,
+    request_total: i64,
+    request_offset: i64,
+    request_limit: i64,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -176,14 +179,27 @@ async fn site_analytics(
     let daily = sqlx::query_as::<_, DailyRow>("SELECT date(created_at) AS day, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, AVG(duration_ms) AS average_duration_ms FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) GROUP BY date(created_at) ORDER BY day DESC")
         .bind(&site_id).bind(format!("-{days} days")).fetch_all(&state.db).await.map_err(anyhow::Error::from)?;
     let pattern = format!("%{}%", query.search.trim());
-    let requests = sqlx::query_as::<_, RequestRow>("SELECT id, created_at, host, method, path, status, duration_ms, protocol, ip_address, country, device_type, user_agent, referer FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) AND (? = '' OR path LIKE ? OR host LIKE ? OR method LIKE ? OR device_type LIKE ? OR country LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?")
-        .bind(&site_id).bind(format!("-{days} days")).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(query.limit.clamp(1, 200)).bind(query.offset.max(0)).fetch_all(&state.db).await.map_err(anyhow::Error::from)?;
+    let status = query.status.unwrap_or(0).clamp(0, 599);
+    let method = query.method.trim().to_ascii_uppercase();
+    let device = query.device.trim();
+    let country = query.country.trim();
+    let request_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) AND (? = '' OR path LIKE ? OR host LIKE ? OR method LIKE ? OR device_type LIKE ? OR country LIKE ?) AND (? = 0 OR status = ?) AND (? = '' OR method = ?) AND (? = '' OR device_type = ?) AND (? = '' OR country = ?)")
+        .bind(&site_id).bind(format!("-{days} days")).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(status).bind(status).bind(&method).bind(&method).bind(device).bind(device).bind(country).bind(country)
+        .fetch_one(&state.db).await.map_err(anyhow::Error::from)?;
+    let limit = query.limit.clamp(1, 200);
+    let offset = query.offset.max(0);
+    let requests = sqlx::query_as::<_, RequestRow>("SELECT id, created_at, host, method, path, status, duration_ms, protocol, ip_address, country, device_type, user_agent, referer FROM site_request_logs WHERE site_id = ? AND created_at >= datetime('now', ?) AND (? = '' OR path LIKE ? OR host LIKE ? OR method LIKE ? OR device_type LIKE ? OR country LIKE ?) AND (? = 0 OR status = ?) AND (? = '' OR method = ?) AND (? = '' OR device_type = ?) AND (? = '' OR country = ?) ORDER BY id DESC LIMIT ? OFFSET ?")
+        .bind(&site_id).bind(format!("-{days} days")).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(status).bind(status).bind(&method).bind(&method).bind(device).bind(device).bind(country).bind(country)
+        .bind(limit).bind(offset).fetch_all(&state.db).await.map_err(anyhow::Error::from)?;
     Ok(HttpResponse::Ok().json(AnalyticsResponse {
         total_requests,
         error_requests,
         average_duration_ms,
         daily,
         requests,
+        request_total,
+        request_offset: offset,
+        request_limit: limit,
     }))
 }
 
@@ -197,6 +213,13 @@ struct DaysQuery {
     limit: i64,
     #[serde(default)]
     offset: i64,
+    status: Option<i64>,
+    #[serde(default)]
+    method: String,
+    #[serde(default)]
+    device: String,
+    #[serde(default)]
+    country: String,
 }
 fn default_days() -> i64 {
     30

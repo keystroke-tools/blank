@@ -698,10 +698,46 @@ pub async fn list(
     req: HttpRequest,
     state: web::Data<AppState>,
     site_id: web::Path<String>,
+    query: web::Query<DeploymentListQuery>,
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, false).await?;
-    let rows=sqlx::query_as::<_,Deployment>("SELECT id,site_id,commit_sha,commit_message,commit_author,status,triggered_by,build_settings_snapshot,config_snapshot,release_path,error_summary,'' AS log,created_at,started_at,finished_at,rollback_of_deployment_id FROM deployments WHERE site_id=? ORDER BY created_at DESC LIMIT 50").bind(site_id.as_str()).fetch_all(&state.db).await.context("failed to list deployments")?;
-    Ok(HttpResponse::Ok().json(rows))
+    let pattern = format!("%{}%", query.search.trim());
+    let status = query.status.trim();
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM deployments WHERE site_id=? AND (?='' OR commit_message LIKE ? OR commit_sha LIKE ? OR status LIKE ? OR triggered_by LIKE ?) AND (?='' OR status=?)")
+        .bind(site_id.as_str()).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(status).bind(status).fetch_one(&state.db).await.context("failed to count deployments")?;
+    let limit = query.limit.clamp(1, 100);
+    let offset = query.offset.max(0);
+    let rows=sqlx::query_as::<_,Deployment>("SELECT id,site_id,commit_sha,commit_message,commit_author,status,triggered_by,build_settings_snapshot,config_snapshot,release_path,error_summary,'' AS log,created_at,started_at,finished_at,rollback_of_deployment_id FROM deployments WHERE site_id=? AND (?='' OR commit_message LIKE ? OR commit_sha LIKE ? OR status LIKE ? OR triggered_by LIKE ?) AND (?='' OR status=?) ORDER BY created_at DESC LIMIT ? OFFSET ?")
+        .bind(site_id.as_str()).bind(query.search.trim()).bind(&pattern).bind(&pattern).bind(&pattern).bind(&pattern).bind(status).bind(status).bind(limit).bind(offset).fetch_all(&state.db).await.context("failed to list deployments")?;
+    Ok(HttpResponse::Ok().json(DeploymentPage {
+        items: rows,
+        total,
+        offset,
+        limit,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeploymentListQuery {
+    #[serde(default)]
+    search: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default = "default_deployment_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
+}
+fn default_deployment_limit() -> i64 {
+    25
+}
+
+#[derive(serde::Serialize)]
+struct DeploymentPage {
+    items: Vec<Deployment>,
+    total: i64,
+    offset: i64,
+    limit: i64,
 }
 pub async fn suggestions(
     req: HttpRequest,
