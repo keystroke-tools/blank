@@ -45,8 +45,8 @@ export type ChimneySite = {
   default_index_file: string | null
   https_config: { auto_redirect: boolean; cert_file: string | null; key_file: string | null; ca_file: string | null } | null
   response_headers: Record<string, string>
-  redirects: Record<string, unknown>
-  rewrites: Record<string, unknown>
+  redirects: Record<string, string>
+  rewrites: Record<string, string>
 }
 export type ChimneyConfiguration = { config: ChimneySite; toml: string; origin: 'generated' | 'repository' | 'dashboard'; imported_hash: string | null; imported_commit: string | null; upstream_hash: string | null; upstream_changed: boolean; updated_at: string }
 
