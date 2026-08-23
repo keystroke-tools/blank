@@ -1,3 +1,4 @@
+mod analytics;
 mod auth;
 mod chimney_config;
 mod chimney_runtime;
@@ -48,10 +49,11 @@ async fn main() -> Result<()> {
         .init();
     let config = Config::from_env()?;
     let db = db::connect(&config).await?;
+    let analytics = analytics::Recorder::start(db.clone());
     deployment::recover_interrupted(&db).await?;
     let git = git::GitService::new(&config.data_dir);
     git.prepare().await?;
-    let chimney = chimney_runtime::ChimneyRuntime::start(&db, &config).await?;
+    let chimney = chimney_runtime::ChimneyRuntime::start(&db, &config, analytics).await?;
     let state = actix_web_data::Data::new(AppState {
         db,
         config: config.clone(),
@@ -74,6 +76,7 @@ async fn main() -> Result<()> {
                     .configure(chimney_config::routes)
                     .configure(deployment::routes)
                     .configure(dns::routes)
+                    .configure(analytics::routes)
                     .configure(sites::routes)
                     .route("/health", actix_web_data::get().to(health)),
             )

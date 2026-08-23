@@ -19,7 +19,7 @@ Blank listens on `127.0.0.1:8080` by default. Copy `.env.example` to `.env` to c
 
 The embedded Chimney listener uses `127.0.0.1:8081` by default and is configured with `BLANK_CHIMNEY_BIND`. Set `BLANK_CHIMNEY_HTTPS_PORT` and `BLANK_CHIMNEY_ACME_EMAIL` to enable Chimney-managed HTTPS. If HTTPS is configured before any active release exists, Blank starts HTTP-only so first-run setup remains available; restart after activating the first site to initialize TLS.
 
-HTTP site and domain changes reload live through Chimney's `ConfigHandle`. The current Chimney API constructs its TLS manager once, so certificate or TLS-domain changes still require a Blank restart. This should move to an upstream Chimney lifecycle API rather than a parallel Blank TLS implementation.
+HTTP site, domain, and TLS certificate changes reload live through Chimney's reload API. Listener host, port, or HTTP/TLS topology changes still require a Blank restart because they would require rebinding sockets.
 
 Repository build commands execute as the Blank service user. Adding a repository to Blank therefore grants its build process code execution as that user.
 
@@ -53,6 +53,14 @@ cargo build --release --locked
 ```
 
 Install the binary and create a dedicated, non-login service account. Install Mise at a system-wide path such as `/usr/local/bin/mise`; repository builds run as the `blank` user and must be able to execute it.
+
+For a host with a supported package manager, the repository includes an installer that creates the service account, builds the frontend and binary, installs the systemd unit, and configures daily rsyslog files:
+
+```sh
+sudo ./scripts/setup.sh
+```
+
+The installer is interactive by default and confirms the repository, ref, service user, and filesystem paths before changing anything. Set `BLANK_REPO`, `BLANK_REF`, or `BLANK_SKIP_PACKAGES=1` to customise it. Use `BLANK_NONINTERACTIVE=1` for unattended setup. The installer copies a Mise binary found under a home directory to `/usr/local/bin/mise` so `ProtectHome=true` does not hide it from the service.
 
 ```sh
 sudo useradd --system --home-dir /var/lib/blank --create-home --shell /usr/sbin/nologin blank
@@ -167,6 +175,15 @@ sudo systemctl restart rsyslog
 sudo systemctl restart blank
 sudo tail -f /var/log/blank/$(date +%F).log
 ```
+
+To update an existing installation, run the updater as root. It downloads the latest release binary for the host architecture, unless `BLANK_BINARY_URL` points to a specific asset or `BLANK_SOURCE_BUILD=1` requests a source build, then atomically replaces the binary and restarts Blank:
+
+```sh
+sudo ./scripts/update.sh
+# or: sudo BLANK_REF=v1.2.0 ./scripts/update.sh
+```
+
+The updater interactively lets you choose the release source or a pre-built binary URL and confirms before stopping the service. Set `BLANK_NONINTERACTIVE=1` for unattended updates.
 
 This produces files such as `/var/log/blank/2026-08-23.log` and rolls to a new path at midnight without restarting Blank. The configuration assumes rsyslog is already receiving systemd journal records, as it does on common Debian and Ubuntu installations. If no file appears, verify that rsyslog's `imjournal` input or journald-to-syslog forwarding is enabled before changing the Blank service.
 

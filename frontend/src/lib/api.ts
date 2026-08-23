@@ -34,6 +34,7 @@ export type BuildSuggestions = { repository_mise: boolean; tools: string[]; inst
 export type MiseToolValidation = { tool: string; valid: boolean; resolved_version: string | null; error: string | null }
 export type Deployment = { id: string; site_id: string; commit_sha: string | null; commit_message: string | null; commit_author: string | null; status: string; triggered_by: string; build_settings_snapshot: string; config_snapshot: string | null; release_path: string | null; error_summary: string | null; log: string; created_at: string; started_at: string | null; finished_at: string | null; rollback_of_deployment_id: string | null }
 export type DnsResult = { domain: string; addresses: string[]; canonical_names: string[]; matches_expected: boolean | null; error: string | null }
+export type SiteAnalytics = { total_requests: number; error_requests: number; average_duration_ms: number; daily: { day: string; requests: number; errors: number; average_duration_ms: number }[] }
 export type RepositoryEntry = { name: string; path: string; kind: 'tree' | 'blob' | string }
 export type Health = { status: string; database: string; chimney: { state: string; active_sites: number; error: string | null }; site_http_port: number; site_https_port: number | null }
 
@@ -85,6 +86,7 @@ export const api = {
   detectDraftBuild: (input: { repository_url: string; branch: string; project_directory: string }, csrfToken: string) => request<BuildSuggestions>('/repositories/detect', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(input) }),
   validateMiseTool: (tool: string, csrfToken: string) => request<MiseToolValidation>('/mise/tools/validate', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ tool }) }),
   deployments: (siteId: string) => request<Deployment[]>(`/sites/${siteId}/deployments`),
+  analytics: (siteId: string) => request<SiteAnalytics>(`/sites/${siteId}/analytics`),
   deployment: (id: string) => request<Deployment>(`/deployments/${id}`),
   createDeployment: (siteId: string, csrfToken: string) => request<Deployment>(`/sites/${siteId}/deployments`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),
   rollbackDeployment: (id: string, csrfToken: string) => request<Deployment>(`/deployments/${id}/rollback`, { method: 'POST', headers: { 'x-csrf-token': csrfToken } }),

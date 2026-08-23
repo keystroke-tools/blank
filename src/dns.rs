@@ -74,6 +74,10 @@ async fn check(
                     .collect()
             })
             .unwrap_or_default();
+        // A domain is considered configured when its resolved A/AAAA set
+        // contains one of the public addresses configured for this server.
+        // Keep this nullable when no expected addresses were configured so a
+        // DNS lookup is not presented as a verification result by mistake.
         let matches_expected = (!state.config.expected_ips.is_empty()).then(|| {
             addresses
                 .iter()

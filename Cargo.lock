@@ -569,8 +569,8 @@ dependencies = [
 
 [[package]]
 name = "chimney"
-version = "1.2.1"
-source = "git+https://github.com/aosasona/chimney?rev=9e46d2a44ec5c63fe59f433c3bc6adc3ebf90b79#9e46d2a44ec5c63fe59f433c3bc6adc3ebf90b79"
+version = "1.3.1"
+source = "git+https://github.com/aosasona/chimney?rev=c01fd6f922850443bf3a13c1b934c7430bc94ca2#c01fd6f922850443bf3a13c1b934c7430bc94ca2"
 dependencies = [
  "chrono",
  "env_logger",

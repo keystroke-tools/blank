@@ -1,0 +1,60 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+      - uses: taiki-e/install-action@v2
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        with:
+          tool: cross
+      - name: Build frontend
+        run: mise exec -- pnpm --dir frontend install --frozen-lockfile && mise exec -- pnpm --dir frontend build
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            cross build --release --locked --target "${{ matrix.target }}"
+          else
+            mise exec -- cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/blank" dist/blank
+          tar -C dist -czf "blank-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" blank
+          sha256sum "blank-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" > "blank-${GITHUB_REF_NAME}-${{ matrix.target }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blank-${{ matrix.target }}
+          path: blank-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

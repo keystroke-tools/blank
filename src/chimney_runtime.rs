@@ -13,11 +13,12 @@ use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 use tokio::sync::RwLock;
 
+use crate::analytics::Recorder;
 use crate::config::Config;
 
 #[derive(Clone)]
 pub struct ChimneyRuntime {
-    handle: ConfigHandle,
+    server: Arc<Server>,
     settings: Config,
     status: Arc<RwLock<RuntimeStatus>>,
 }
@@ -48,7 +49,7 @@ struct StoredSite {
 const MISSING_DEPLOYMENT_PAGE: &str = include_str!("../assets/missing-deployment.html");
 
 impl ChimneyRuntime {
-    pub async fn start(db: &SqlitePool, settings: &Config) -> Result<Self> {
+    pub async fn start(db: &SqlitePool, settings: &Config, analytics: Recorder) -> Result<Self> {
         let config = build_config(db, settings).await?;
         let active_sites = config.sites.len();
         let handle = ConfigHandle::from(config);
@@ -66,17 +67,19 @@ impl ChimneyRuntime {
             LocalFS::new(settings.data_dir.join("sites"))
                 .context("failed to initialize Chimney filesystem")?,
         );
-        let server = if tls_at_start {
+        let server = Arc::new(if tls_at_start {
             Server::new_with_tls(filesystem, handle.clone())
                 .await
                 .context("failed to initialize Chimney TLS")?
         } else {
             Server::new(filesystem, handle.clone())
-        };
+        });
+        server.on_request(move |event| analytics.record(event));
+        let server_task = server.clone();
         let task_status = status.clone();
         tokio::spawn(async move {
             task_status.write().await.state = RuntimeState::Running;
-            if let Err(error) = server.run().await {
+            if let Err(error) = server_task.run().await {
                 let mut status = task_status.write().await;
                 status.state = RuntimeState::Failed;
                 status.error = Some(error.to_string());
@@ -84,7 +87,7 @@ impl ChimneyRuntime {
             }
         });
         Ok(Self {
-            handle,
+            server,
             settings: settings.clone(),
             status,
         })
@@ -93,8 +96,9 @@ impl ChimneyRuntime {
     pub async fn reload(&self, db: &SqlitePool) -> Result<()> {
         let config = build_config(db, &self.settings).await?;
         let active_sites = config.sites.len();
-        self.handle
-            .set(config)
+        self.server
+            .reload(config)
+            .await
             .context("failed to update embedded Chimney configuration")?;
         self.status.write().await.active_sites = active_sites;
         Ok(())
