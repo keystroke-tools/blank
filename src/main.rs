@@ -15,7 +15,7 @@ mod state;
 mod web;
 
 use actix_web::{App, HttpResponse, HttpServer, middleware, web as actix_web_data};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing_actix_web::TracingLogger;
@@ -41,7 +41,6 @@ async fn health(state: actix_web_data::Data<AppState>) -> HttpResponse {
 #[actix_web::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_log::LogTracer::init().context("failed to initialize log-to-tracing bridge")?;
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
