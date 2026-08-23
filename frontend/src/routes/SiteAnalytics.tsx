@@ -5,14 +5,243 @@ import { AppShell } from '../components/AppShell'
 import { api } from '../lib/api'
 
 export function SiteAnalytics({ siteId }: { siteId: string }) {
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('')
-  const [method, setMethod] = useState('')
-  const [device, setDevice] = useState('')
-  const [page, setPage] = useState(0)
-  const pageSize = 50
-  const analytics = useQuery({ queryKey: ['analytics', siteId, search, status, method, device, page], queryFn: () => api.analytics(siteId, { search, status, method, device, offset: page * pageSize, limit: pageSize }) })
-  return <AppShell><main className="mx-auto max-w-6xl px-6 py-12"><Link to="/sites/$siteId" params={{ siteId }} className="text-sm text-muted hover:text-ink">← Site</Link><div className="mt-10"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Telemetry</p><h1 className="mt-2 text-3xl font-semibold">Request analytics</h1><p className="mt-2 text-sm text-muted">Detailed request telemetry from the last 30 days.</p></div>{analytics.data && <div className="mt-8 grid gap-3 sm:grid-cols-3"><Metric label="Requests" value={analytics.data.total_requests.toLocaleString()} /><Metric label="Errors" value={analytics.data.error_requests.toLocaleString()} /><Metric label="Average response" value={`${analytics.data.average_duration_ms.toFixed(0)} ms`} /></div>}<div className="mt-8 border border-border bg-surface p-5"><div className="grid gap-3 md:grid-cols-[1fr_10rem_10rem_10rem]"><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0) }} placeholder="Search path, host, method, device, or country" className="h-11 border border-border bg-background px-3 text-sm outline-none focus:border-primary" /><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(0) }} className="h-11 border border-border bg-background px-3 text-sm"><option value="">Any status</option><option value="200">200 OK</option><option value="301">301 redirect</option><option value="404">404 not found</option><option value="500">500 error</option></select><select value={method} onChange={(event) => { setMethod(event.target.value); setPage(0) }} className="h-11 border border-border bg-background px-3 text-sm"><option value="">Any method</option><option>GET</option><option>POST</option><option>HEAD</option></select><select value={device} onChange={(event) => { setDevice(event.target.value); setPage(0) }} className="h-11 border border-border bg-background px-3 text-sm"><option value="">Any device</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option><option value="tablet">Tablet</option></select></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="border-b border-border text-muted"><tr>{['Time', 'Request', 'Status', 'Duration', 'Device', 'Country', 'IP'].map((heading) => <th key={heading} className="px-3 py-3 font-semibold">{heading}</th>)}</tr></thead><tbody className="divide-y divide-border">{analytics.data?.requests.map((request) => <tr key={request.id}><td className="whitespace-nowrap px-3 py-3 text-muted">{new Date(`${request.created_at}Z`).toLocaleString()}</td><td className="max-w-[26rem] px-3 py-3"><span className="font-mono text-primary">{request.method}</span> <span className="break-all">{request.path}</span><span className="block text-muted">{request.host ?? 'unknown host'}</span></td><td className={request.status >= 400 ? 'px-3 py-3 text-danger' : 'px-3 py-3 text-primary'}>{request.status}</td><td className="px-3 py-3">{request.duration_ms} ms</td><td className="px-3 py-3">{request.device_type}</td><td className="px-3 py-3">{request.country ?? 'Unknown'}</td><td className="px-3 py-3 font-mono text-muted">{request.ip_address ?? 'Unknown'}</td></tr>)}</tbody></table>{analytics.data?.requests.length === 0 && <p className="py-10 text-center text-sm text-muted">No matching requests.</p>}</div><Pager page={page} pageSize={pageSize} total={analytics.data?.request_total ?? 0} onChange={setPage} /></div></main></AppShell>
+	const [search, setSearch] = useState('')
+	const [status, setStatus] = useState('')
+	const [method, setMethod] = useState('')
+	const [device, setDevice] = useState('')
+	const [page, setPage] = useState(0)
+	const pageSize = 50
+	const analytics = useQuery({
+		queryKey: ['analytics', siteId, search, status, method, device, page],
+		queryFn: () =>
+			api.analytics(siteId, {
+				search,
+				status,
+				method,
+				device,
+				offset: page * pageSize,
+				limit: pageSize,
+			}),
+	})
+	return (
+		<AppShell>
+			<main className="mx-auto max-w-6xl px-6 py-12">
+				<Link
+					to="/sites/$siteId"
+					params={{ siteId }}
+					className="text-sm text-muted hover:text-ink"
+				>
+					← Site
+				</Link>
+				<div className="mt-10">
+					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+						Telemetry
+					</p>
+					<h1 className="mt-2 text-3xl font-semibold">
+						Request analytics
+					</h1>
+					<p className="mt-2 text-sm text-muted">
+						Detailed request telemetry from the last 30 days.
+					</p>
+				</div>
+				{analytics.data && (
+					<div className="mt-8 grid gap-3 sm:grid-cols-3">
+						<Metric
+							label="Requests"
+							value={analytics.data.total_requests.toLocaleString()}
+						/>
+						<Metric
+							label="Errors"
+							value={analytics.data.error_requests.toLocaleString()}
+						/>
+						<Metric
+							label="Average response"
+							value={`${analytics.data.average_duration_ms.toFixed(0)} ms`}
+						/>
+					</div>
+				)}
+				<div className="mt-8 border border-border bg-surface p-5">
+					<div className="grid gap-3 md:grid-cols-[1fr_10rem_10rem_10rem]">
+						<input
+							value={search}
+							onChange={(event) => {
+								setSearch(event.target.value)
+								setPage(0)
+							}}
+							placeholder="Search path, host, method, device, or country"
+							className="h-11 border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+						/>
+						<select
+							value={status}
+							onChange={(event) => {
+								setStatus(event.target.value)
+								setPage(0)
+							}}
+							className="h-11 border border-border bg-background px-3 text-sm"
+						>
+							<option value="">Any status</option>
+							<option value="200">200 OK</option>
+							<option value="301">301 redirect</option>
+							<option value="404">404 not found</option>
+							<option value="500">500 error</option>
+						</select>
+						<select
+							value={method}
+							onChange={(event) => {
+								setMethod(event.target.value)
+								setPage(0)
+							}}
+							className="h-11 border border-border bg-background px-3 text-sm"
+						>
+							<option value="">Any method</option>
+							<option>GET</option>
+							<option>POST</option>
+							<option>HEAD</option>
+						</select>
+						<select
+							value={device}
+							onChange={(event) => {
+								setDevice(event.target.value)
+								setPage(0)
+							}}
+							className="h-11 border border-border bg-background px-3 text-sm"
+						>
+							<option value="">Any device</option>
+							<option value="desktop">Desktop</option>
+							<option value="mobile">Mobile</option>
+							<option value="tablet">Tablet</option>
+						</select>
+					</div>
+					<div className="mt-5 overflow-x-auto">
+						<table className="w-full min-w-[900px] text-left text-xs">
+							<thead className="border-b border-border text-muted">
+								<tr>
+									{[
+										'Time',
+										'Request',
+										'Status',
+										'Duration',
+										'Device',
+										'Country',
+										'IP',
+									].map((heading) => (
+										<th
+											key={heading}
+											className="px-3 py-3 font-semibold"
+										>
+											{heading}
+										</th>
+									))}
+								</tr>
+							</thead>
+							<tbody className="divide-y divide-border">
+								{analytics.data?.requests.map((request) => (
+									<tr key={request.id}>
+										<td className="whitespace-nowrap px-3 py-3 text-muted">
+											{new Date(
+												`${request.created_at}Z`,
+											).toLocaleString()}
+										</td>
+										<td className="max-w-[26rem] px-3 py-3">
+											<span className="font-mono text-primary">
+												{request.method}
+											</span>{' '}
+											<span className="break-all">
+												{request.path}
+											</span>
+											<span className="block text-muted">
+												{request.host ?? 'unknown host'}
+											</span>
+										</td>
+										<td
+											className={
+												request.status >= 400
+													? 'px-3 py-3 text-danger'
+													: 'px-3 py-3 text-primary'
+											}
+										>
+											{request.status}
+										</td>
+										<td className="px-3 py-3">
+											{request.duration_ms} ms
+										</td>
+										<td className="px-3 py-3">
+											{request.device_type}
+										</td>
+										<td className="px-3 py-3">
+											{request.country ?? 'Unknown'}
+										</td>
+										<td className="px-3 py-3 font-mono text-muted">
+											{request.ip_address ?? 'Unknown'}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+						{analytics.data?.requests.length === 0 && (
+							<p className="py-10 text-center text-sm text-muted">
+								No matching requests.
+							</p>
+						)}
+					</div>
+					<Pager
+						page={page}
+						pageSize={pageSize}
+						total={analytics.data?.request_total ?? 0}
+						onChange={setPage}
+					/>
+				</div>
+			</main>
+		</AppShell>
+	)
 }
-function Metric({ label, value }: { label: string; value: string }) { return <div className="border border-border bg-surface p-5"><p className="text-xs uppercase tracking-wider text-muted">{label}</p><p className="mt-2 text-2xl font-semibold">{value}</p></div> }
-function Pager({ page, pageSize, total, onChange }: { page: number; pageSize: number; total: number; onChange: (page: number) => void }) { const pages = Math.max(1, Math.ceil(total / pageSize)); return <div className="mt-5 flex items-center justify-between border-t border-border pt-4 text-xs text-muted"><span>{total === 0 ? 'No results' : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}`}</span><div className="flex gap-2"><button type="button" disabled={page === 0} onClick={() => onChange(page - 1)} className="border border-border px-3 py-2 disabled:opacity-40">Previous</button><button type="button" disabled={page + 1 >= pages} onClick={() => onChange(page + 1)} className="border border-border px-3 py-2 disabled:opacity-40">Next</button></div></div> }
+function Metric({ label, value }: { label: string; value: string }) {
+	return (
+		<div className="border border-border bg-surface p-5">
+			<p className="text-xs uppercase tracking-wider text-muted">
+				{label}
+			</p>
+			<p className="mt-2 text-2xl font-semibold">{value}</p>
+		</div>
+	)
+}
+function Pager({
+	page,
+	pageSize,
+	total,
+	onChange,
+}: {
+	page: number
+	pageSize: number
+	total: number
+	onChange: (page: number) => void
+}) {
+	const pages = Math.max(1, Math.ceil(total / pageSize))
+	return (
+		<div className="mt-5 flex items-center justify-between border-t border-border pt-4 text-xs text-muted">
+			<span>
+				{total === 0
+					? 'No results'
+					: `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}`}
+			</span>
+			<div className="flex gap-2">
+				<button
+					type="button"
+					disabled={page === 0}
+					onClick={() => onChange(page - 1)}
+					className="border border-border px-3 py-2 disabled:opacity-40"
+				>
+					Previous
+				</button>
+				<button
+					type="button"
+					disabled={page + 1 >= pages}
+					onClick={() => onChange(page + 1)}
+					className="border border-border px-3 py-2 disabled:opacity-40"
+				>
+					Next
+				</button>
+			</div>
+		</div>
+	)
+}
