@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { AppShell } from '../components/AppShell'
@@ -5,13 +6,25 @@ import { api, type Site } from '../lib/api'
 import { queryKeys } from '../lib/query-client'
 
 export function Dashboard() {
+  const [tab, setTab] = useState<'all' | 'published' | 'setup'>('all')
+  const [search, setSearch] = useState('')
   const sites = useQuery({ queryKey: queryKeys.sites, queryFn: api.sites })
+  const filteredSites = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    return sites.data?.filter((site) => (tab === 'all' || (tab === 'published' ? site.domains.length > 0 : site.domains.length === 0)) && (!needle || [site.name, site.repository_url, site.branch, ...site.domains].some((value) => value.toLowerCase().includes(needle)))) ?? []
+  }, [sites.data, tab, search])
   return <AppShell><main className="mx-auto max-w-6xl px-6 py-14">
     <div className="flex flex-wrap items-end justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Workspace</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Your sites</h1><p className="mt-2 text-sm text-muted">Deploy, inspect, and manage every static project.</p></div><Link to="/sites/new" className="inline-flex h-11 items-center gap-2 bg-primary px-5 text-sm font-semibold text-primary-ink hover:bg-[#f5ffc2]"><span className="text-lg leading-none">+</span> New site</Link></div>
     {sites.isPending && <LoadingGrid />}
     {sites.isError && <p role="alert" className="mt-8 border-l-2 border-danger pl-4 text-sm text-danger">{sites.error.message}</p>}
     {sites.data?.length === 0 && <section className="mt-10 border border-dashed border-border bg-surface/40 px-6 py-20 text-center"><div className="mx-auto flex size-14 items-center justify-center border border-border bg-background text-2xl text-primary">+</div><h2 className="mt-5 font-medium">Deploy your first site</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">Connect a Git repository and Blank will detect how to build and publish it.</p><Link to="/sites/new" className="mt-6 inline-flex h-10 items-center border border-primary px-4 text-sm font-semibold text-primary hover:bg-primary hover:text-primary-ink">Add a repository</Link></section>}
-    {sites.data && sites.data.length > 0 && <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{sites.data.map((site) => <SiteCard key={site.id} site={site} />)}</div>}
+    {sites.data && sites.data.length > 0 && <>
+      <nav aria-label="Site filters" role="tablist" className="mt-10 flex gap-1 overflow-x-auto border-b border-border">
+        {([['all', 'All sites'], ['published', 'With domains'], ['setup', 'Needs setup']] as const).map(([value, label]) => <button key={value} role="tab" type="button" onClick={() => setTab(value)} className={`border-b-2 px-4 py-3 text-sm font-semibold whitespace-nowrap transition ${tab === value ? 'border-primary text-ink' : 'border-transparent text-muted hover:text-ink'}`} aria-selected={tab === value}>{label}<span className="ml-2 font-mono text-xs text-muted">{value === 'all' ? sites.data.length : value === 'published' ? sites.data.filter((site) => site.domains.length > 0).length : sites.data.filter((site) => site.domains.length === 0).length}</span></button>)}
+      </nav>
+      <div className="mt-5"><label htmlFor="site-search" className="sr-only">Search sites</label><input id="site-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search sites, domains, repositories, or branches" className="h-11 w-full border border-border bg-surface px-4 text-sm outline-none focus:border-primary" /></div>
+      {filteredSites.length > 0 ? <div className="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{filteredSites.map((site) => <SiteCard key={site.id} site={site} />)}</div> : <section className="mt-7 border border-dashed border-border bg-surface/40 px-6 py-16 text-center"><h2 className="font-medium">Nothing here yet</h2><p className="mt-2 text-sm text-muted">Sites will appear in this view when they match the filter.</p></section>}
+    </>}
   </main></AppShell>
 }
 
