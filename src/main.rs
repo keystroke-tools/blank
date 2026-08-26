@@ -23,19 +23,23 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{config::Config, state::AppState};
 
-async fn health(state: actix_web_data::Data<AppState>) -> HttpResponse {
+async fn health(
+    req: actix_web::HttpRequest,
+    state: actix_web_data::Data<AppState>,
+) -> Result<HttpResponse, crate::error::ApiError> {
+    crate::auth::require_session(&req, &state.db, false).await?;
     let database = sqlx::query_scalar::<_, i64>("SELECT 1")
         .fetch_one(&state.db)
         .await
         .is_ok();
     let chimney = state.chimney.status().await;
-    HttpResponse::Ok().json(serde_json::json!({
+    Ok(HttpResponse::Ok().json(serde_json::json!({
         "status": if database { "ok" } else { "degraded" },
         "database": if database { "healthy" } else { "unhealthy" },
         "chimney": chimney,
         "site_http_port": state.config.chimney_bind.port(),
         "site_https_port": state.config.chimney_https_port,
-    }))
+    })))
 }
 
 #[actix_web::main]

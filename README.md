@@ -2,6 +2,10 @@
 
 Blank is a deliberately small, self-hosted deployment platform for static frontend applications. It uses normal Linux primitives—Git, Mise, SQLite, immutable directories, symlinks, and systemd—and will embed Chimney for site serving.
 
+### LLM usage disclosure
+
+Blank was developed with assistance from large language models. Blank does not send your source code, repository credentials, request telemetry, or other project data to an LLM at runtime. Build and detection suggestions are generated locally from repository files.
+
 Blank is not a container platform, a general-purpose PaaS, or a CI system.
 
 ## Development

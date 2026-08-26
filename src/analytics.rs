@@ -75,7 +75,7 @@ impl Recorder {
             status: event.status.as_u16(),
             duration_ms: event.duration.as_millis().min(i64::MAX as u128) as i64,
             protocol,
-            ip_address: event.remote_addr.map(|address| address.ip().to_string()),
+            ip_address: client_ip(event),
             country: event
                 .request_headers
                 .get("cf-ipcountry")
@@ -101,6 +101,24 @@ impl Recorder {
                 .map(|value| value.chars().take(2048).collect()),
         });
     }
+}
+
+// Chimney sits behind the local reverse proxy in production, so the socket
+// address is the proxy itself. Prefer headers set by that trusted proxy.
+fn client_ip(event: &RequestEvent) -> Option<String> {
+    for name in ["cf-connecting-ip", "x-real-ip", "x-forwarded-for"] {
+        if let Some(value) = event
+            .request_headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+        {
+            let value = value.split(',').next().unwrap_or_default().trim();
+            if value.parse::<std::net::IpAddr>().is_ok() {
+                return Some(value.to_owned());
+            }
+        }
+    }
+    event.remote_addr.map(|address| address.ip().to_string())
 }
 
 fn device_type(user_agent: &str) -> &'static str {

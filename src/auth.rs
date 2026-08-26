@@ -168,13 +168,16 @@ pub async fn login(
     state: web::Data<AppState>,
     input: web::Json<Credentials>,
 ) -> Result<HttpResponse, ApiError> {
-    let row =
+    let Some(row) =
         sqlx::query("SELECT identifier, password_hash FROM administrators WHERE identifier = ?")
             .bind(input.identifier.trim())
             .fetch_optional(&state.db)
             .await
             .context("failed to load administrator")?
-            .ok_or(ApiError::Unauthorized)?;
+    else {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        return Err(ApiError::Unauthorized);
+    };
     let hash: String = row.get("password_hash");
     let password = input.password.clone();
     let valid = web::block(move || {
@@ -187,6 +190,7 @@ pub async fn login(
     .await
     .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
     if !valid {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return Err(ApiError::Unauthorized);
     }
     let (token, csrf_token) = create_session(&state.db).await?;

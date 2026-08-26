@@ -135,6 +135,18 @@ fn validate(input: &SiteInput) -> Result<Vec<String>, ApiError> {
     if input.repository_url.len() > 2048 {
         return Err(ApiError::BadRequest("repository URL is too long".into()));
     }
+    for (label, command) in [
+        ("install command", &input.install_command),
+        ("build command", &input.build_command),
+    ] {
+        if let Some(command) = command.as_deref() {
+            if command.len() > 4096 || command.chars().any(char::is_control) {
+                return Err(ApiError::BadRequest(format!(
+                    "{label} is too long or contains control characters"
+                )));
+            }
+        }
+    }
     validate_repository_url(input.repository_url.trim())
         .map_err(|_| ApiError::BadRequest("invalid repository URL".into()))?;
     validate_branch(input.branch.trim())

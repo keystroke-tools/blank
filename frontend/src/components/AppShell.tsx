@@ -36,6 +36,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 				</div>
 			</header>
 			{children}
+			<footer className="mx-auto max-w-6xl px-6 py-8 text-xs text-muted">
+				LLM disclosure: Blank was developed with assistance from large
+				language models.
+			</footer>
 		</div>
 	)
 }
