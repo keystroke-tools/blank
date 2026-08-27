@@ -45,13 +45,16 @@ impl Config {
             .context("BLANK_CHIMNEY_BIND must be a socket address")?;
         let chimney_https_port = env::var("BLANK_CHIMNEY_HTTPS_PORT")
             .ok()
+            .filter(|value| !value.trim().is_empty())
             .map(|value| {
                 value
                     .parse()
                     .context("BLANK_CHIMNEY_HTTPS_PORT must be a port")
             })
             .transpose()?;
-        let chimney_acme_email = env::var("BLANK_CHIMNEY_ACME_EMAIL").ok();
+        let chimney_acme_email = env::var("BLANK_CHIMNEY_ACME_EMAIL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let release_retention = env::var("BLANK_RELEASE_RETENTION")
             .unwrap_or_else(|_| "5".into())
             .parse::<usize>()

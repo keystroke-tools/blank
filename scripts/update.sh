@@ -9,10 +9,47 @@ BLANK_REF="${BLANK_REF:-master}"
 BLANK_RELEASE_REPO="${BLANK_RELEASE_REPO:-keystroke-tools/blank}"
 BLANK_INSTALL_DIR="${BLANK_INSTALL_DIR:-/usr/local/bin}"
 BLANK_SERVICE="${BLANK_SERVICE:-blank.service}"
+BLANK_ENV_FILE="${BLANK_ENV_FILE:-/etc/blank.env}"
 BLANK_BINARY_URL="${BLANK_BINARY_URL:-}"
 BLANK_SOURCE_BUILD="${BLANK_SOURCE_BUILD:-0}"
 WORK="$(mktemp -d /tmp/blank-update.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
+declare -A PENDING_ENV=()
+
+env_value() {
+  [[ -f "$BLANK_ENV_FILE" ]] || return 0
+  sed -n "s/^$1=//p" "$BLANK_ENV_FILE" | tail -n 1
+}
+
+effective_env_value() {
+  local key="$1"
+  if [[ -n "${PENDING_ENV[$key]-}" ]]; then printf '%s' "${PENDING_ENV[$key]}"; else env_value "$key"; fi
+}
+
+set_env_value() {
+  local key="$1" value="$2" escaped
+  [[ -n "$value" ]] || return 0
+  escaped="${value//&/\\&}"
+  if grep -q "^$key=" "$BLANK_ENV_FILE"; then
+    sed -i "s|^$key=.*|$key=$escaped|" "$BLANK_ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$BLANK_ENV_FILE"
+  fi
+}
+
+prompt_missing_env() {
+  local key="$1" label="$2" default="${3:-}" current value
+  current="$(env_value "$key")"
+  [[ -z "$current" ]] || return 0
+  read -r -p "$label${default:+ [$default]}: " value
+  value="${value:-$default}"
+  [[ -z "$value" ]] || PENDING_ENV["$key"]="$value"
+}
+
+apply_pending_env() {
+  local key
+  for key in "${!PENDING_ENV[@]}"; do set_env_value "$key" "${PENDING_ENV[$key]}"; done
+}
 
 [[ "$(id -u)" -eq 0 ]] || { printf 'blank update: run as root\n' >&2; exit 1; }
 if [[ -t 0 && "${BLANK_NONINTERACTIVE:-0}" != 1 ]]; then
@@ -20,8 +57,26 @@ if [[ -t 0 && "${BLANK_NONINTERACTIVE:-0}" != 1 ]]; then
   read -r -p "Repository [$BLANK_REPO]: " value; [[ -z "$value" ]] || BLANK_REPO="$value"
   read -r -p "Git ref [$BLANK_REF]: " value; [[ -z "$value" ]] || BLANK_REF="$value"
   read -r -p "Pre-built binary URL [${BLANK_BINARY_URL:-latest release}]: " value; [[ -z "$value" ]] || BLANK_BINARY_URL="$value"
+  if [[ -z "$BLANK_BINARY_URL" ]]; then
+    read -r -p 'Build from source instead of using the latest release? [y/N] ' value
+    [[ "$value" =~ ^[Yy]([Ee][Ss])?$ ]] && BLANK_SOURCE_BUILD=1
+  fi
   read -r -p "Install directory [$BLANK_INSTALL_DIR]: " value; [[ -z "$value" ]] || BLANK_INSTALL_DIR="$value"
   read -r -p "Systemd service [$BLANK_SERVICE]: " value; [[ -z "$value" ]] || BLANK_SERVICE="$value"
+  read -r -p "Environment file [$BLANK_ENV_FILE]: " value; [[ -z "$value" ]] || BLANK_ENV_FILE="$value"
+  if [[ -f "$BLANK_ENV_FILE" ]]; then
+    printf '\nChecking runtime configuration...\n'
+    prompt_missing_env BLANK_PUBLIC_URL "Public dashboard URL"
+    prompt_missing_env BLANK_EXPECTED_IPS "Expected public IPs, comma-separated"
+    prompt_missing_env BLANK_SECURE_COOKIES "Secure cookies" "true"
+    prompt_missing_env BLANK_RELEASE_RETENTION "Successful releases to retain" "5"
+    prompt_missing_env BLANK_CHIMNEY_HTTPS_PORT "Site HTTPS port (blank keeps TLS disabled)"
+    if [[ -n "$(effective_env_value BLANK_CHIMNEY_HTTPS_PORT)" ]]; then
+      prompt_missing_env BLANK_CHIMNEY_ACME_EMAIL "ACME email"
+    fi
+  else
+    printf 'Environment file %s does not exist; runtime settings will not be changed.\n' "$BLANK_ENV_FILE" >&2
+  fi
   if [[ -n "$BLANK_BINARY_URL" ]]; then
     printf '\nUpdate source: pre-built binary\n'
   elif [[ "$BLANK_SOURCE_BUILD" == 1 ]]; then
@@ -70,6 +125,7 @@ else
   cp target/release/blank "$WORK/blank"
 fi
 
+apply_pending_env
 chmod 0755 "$WORK/blank"
 systemctl stop "$BLANK_SERVICE"
 install -o root -g root -m 0755 "$WORK/blank" "$BLANK_INSTALL_DIR/.blank.new"

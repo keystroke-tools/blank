@@ -139,12 +139,12 @@ fn validate(input: &SiteInput) -> Result<Vec<String>, ApiError> {
         ("install command", &input.install_command),
         ("build command", &input.build_command),
     ] {
-        if let Some(command) = command.as_deref() {
-            if command.len() > 4096 || command.chars().any(char::is_control) {
-                return Err(ApiError::BadRequest(format!(
-                    "{label} is too long or contains control characters"
-                )));
-            }
+        if let Some(command) = command.as_deref()
+            && (command.len() > 4096 || command.chars().any(char::is_control))
+        {
+            return Err(ApiError::BadRequest(format!(
+                "{label} is too long or contains control characters"
+            )));
         }
     }
     validate_repository_url(input.repository_url.trim())

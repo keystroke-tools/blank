@@ -14,6 +14,14 @@ BLANK_INSTALL_DIR="${BLANK_INSTALL_DIR:-/usr/local/bin}"
 BLANK_ENV_FILE="${BLANK_ENV_FILE:-/etc/blank.env}"
 BLANK_SKIP_PACKAGES="${BLANK_SKIP_PACKAGES:-0}"
 BLANK_SERVICE="${BLANK_SERVICE:-blank.service}"
+BLANK_BIND="${BLANK_BIND:-127.0.0.1:8080}"
+BLANK_CHIMNEY_BIND="${BLANK_CHIMNEY_BIND:-127.0.0.1:8081}"
+BLANK_CHIMNEY_HTTPS_PORT="${BLANK_CHIMNEY_HTTPS_PORT:-}"
+BLANK_CHIMNEY_ACME_EMAIL="${BLANK_CHIMNEY_ACME_EMAIL:-}"
+BLANK_PUBLIC_URL="${BLANK_PUBLIC_URL:-}"
+BLANK_EXPECTED_IPS="${BLANK_EXPECTED_IPS:-}"
+BLANK_SECURE_COOKIES="${BLANK_SECURE_COOKIES:-true}"
+BLANK_RELEASE_RETENTION="${BLANK_RELEASE_RETENTION:-5}"
 BLANK_ROOT="$(mktemp -d /tmp/blank-setup.XXXXXX)"
 trap 'rm -rf "$BLANK_ROOT"' EXIT
 
@@ -28,9 +36,23 @@ if [[ -t 0 && "${BLANK_NONINTERACTIVE:-0}" != 1 ]]; then
   read -r -p "Data directory [$BLANK_DATA_DIR]: " value; [[ -z "$value" ]] || BLANK_DATA_DIR="$value"
   read -r -p "Install directory [$BLANK_INSTALL_DIR]: " value; [[ -z "$value" ]] || BLANK_INSTALL_DIR="$value"
   read -r -p "Environment file [$BLANK_ENV_FILE]: " value; [[ -z "$value" ]] || BLANK_ENV_FILE="$value"
+  read -r -p "Admin bind address [$BLANK_BIND]: " value; [[ -z "$value" ]] || BLANK_BIND="$value"
+  read -r -p "Site HTTP bind address [$BLANK_CHIMNEY_BIND]: " value; [[ -z "$value" ]] || BLANK_CHIMNEY_BIND="$value"
+  read -r -p "Site HTTPS port${BLANK_CHIMNEY_HTTPS_PORT:+ [$BLANK_CHIMNEY_HTTPS_PORT]} (blank disables TLS): " value; [[ -z "$value" ]] || BLANK_CHIMNEY_HTTPS_PORT="$value"
+  if [[ -n "$BLANK_CHIMNEY_HTTPS_PORT" ]]; then
+    read -r -p "ACME email${BLANK_CHIMNEY_ACME_EMAIL:+ [$BLANK_CHIMNEY_ACME_EMAIL]}: " value; [[ -z "$value" ]] || BLANK_CHIMNEY_ACME_EMAIL="$value"
+  fi
+  read -r -p "Public dashboard URL${BLANK_PUBLIC_URL:+ [$BLANK_PUBLIC_URL]}: " value; [[ -z "$value" ]] || BLANK_PUBLIC_URL="$value"
+  read -r -p "Expected public IPs, comma-separated${BLANK_EXPECTED_IPS:+ [$BLANK_EXPECTED_IPS]}: " value; [[ -z "$value" ]] || BLANK_EXPECTED_IPS="$value"
+  read -r -p "Secure cookies [$BLANK_SECURE_COOKIES]: " value; [[ -z "$value" ]] || BLANK_SECURE_COOKIES="$value"
+  read -r -p "Successful releases to retain [$BLANK_RELEASE_RETENTION]: " value; [[ -z "$value" ]] || BLANK_RELEASE_RETENTION="$value"
   printf '\nRepository: %s\nRef: %s\nService user: %s\nData: %s\nInstall: %s\n' "$BLANK_REPO" "$BLANK_REF" "$BLANK_SERVICE_USER" "$BLANK_DATA_DIR" "$BLANK_INSTALL_DIR"
   read -r -p 'Continue? [y/N] ' value
   [[ "$value" =~ ^[Yy]([Ee][Ss])?$ ]] || exit 0
+fi
+
+if [[ -n "$BLANK_CHIMNEY_HTTPS_PORT" && -z "$BLANK_CHIMNEY_ACME_EMAIL" ]]; then
+  die 'BLANK_CHIMNEY_ACME_EMAIL is required when BLANK_CHIMNEY_HTTPS_PORT is set'
 fi
 
 require_root
@@ -57,6 +79,7 @@ if [[ -z "$MISE_BIN" ]]; then
     if [[ -x "$candidate" ]]; then MISE_BIN="$candidate"; break; fi
   done
 fi
+
 [[ -n "$MISE_BIN" ]] || die 'Mise is required to build Blank; install it and rerun (or set BLANK_SKIP_PACKAGES=1)'
 if [[ "$MISE_BIN" == /home/* || "$MISE_BIN" == /root/* ]]; then
   install -o root -g root -m 0755 "$MISE_BIN" /usr/local/bin/mise
@@ -82,17 +105,35 @@ install -o root -g root -m 0755 target/release/blank "$BLANK_INSTALL_DIR/blank"
 if [[ ! -f "$BLANK_ENV_FILE" ]]; then
   install -d -m 0755 "$(dirname "$BLANK_ENV_FILE")"
   cat >"$BLANK_ENV_FILE" <<EOF
-BLANK_BIND=127.0.0.1:8080
-BLANK_CHIMNEY_BIND=127.0.0.1:8081
+BLANK_BIND=$BLANK_BIND
+BLANK_CHIMNEY_BIND=$BLANK_CHIMNEY_BIND
+BLANK_CHIMNEY_HTTPS_PORT=$BLANK_CHIMNEY_HTTPS_PORT
+BLANK_CHIMNEY_ACME_EMAIL=$BLANK_CHIMNEY_ACME_EMAIL
 BLANK_DATA_DIR=$BLANK_DATA_DIR
 BLANK_MISE_BIN=$MISE_BIN
-BLANK_SECURE_COOKIES=true
-BLANK_RELEASE_RETENTION=5
-BLANK_PUBLIC_URL=
+BLANK_SECURE_COOKIES=$BLANK_SECURE_COOKIES
+BLANK_RELEASE_RETENTION=$BLANK_RELEASE_RETENTION
+BLANK_PUBLIC_URL=$BLANK_PUBLIC_URL
+BLANK_EXPECTED_IPS=$BLANK_EXPECTED_IPS
 EOF
   chown root:"$BLANK_SERVICE_USER" "$BLANK_ENV_FILE"
   chmod 0640 "$BLANK_ENV_FILE"
 fi
+
+ensure_env_value() {
+  local key="$1" value="$2"
+  grep -q "^$key=" "$BLANK_ENV_FILE" || printf '%s=%s\n' "$key" "$value" >>"$BLANK_ENV_FILE"
+}
+ensure_env_value BLANK_BIND "$BLANK_BIND"
+ensure_env_value BLANK_CHIMNEY_BIND "$BLANK_CHIMNEY_BIND"
+ensure_env_value BLANK_CHIMNEY_HTTPS_PORT "$BLANK_CHIMNEY_HTTPS_PORT"
+ensure_env_value BLANK_CHIMNEY_ACME_EMAIL "$BLANK_CHIMNEY_ACME_EMAIL"
+ensure_env_value BLANK_DATA_DIR "$BLANK_DATA_DIR"
+ensure_env_value BLANK_MISE_BIN "$MISE_BIN"
+ensure_env_value BLANK_SECURE_COOKIES "$BLANK_SECURE_COOKIES"
+ensure_env_value BLANK_RELEASE_RETENTION "$BLANK_RELEASE_RETENTION"
+ensure_env_value BLANK_PUBLIC_URL "$BLANK_PUBLIC_URL"
+ensure_env_value BLANK_EXPECTED_IPS "$BLANK_EXPECTED_IPS"
 
 install -d -o syslog -g adm -m 0750 /var/log/blank 2>/dev/null || install -d -m 0750 /var/log/blank
 cat >/etc/systemd/system/blank.service <<EOF

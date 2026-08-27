@@ -64,7 +64,7 @@ For a host with a supported package manager, the repository includes an installe
 sudo ./scripts/setup.sh
 ```
 
-The installer is interactive by default and confirms the repository, ref, service user, and filesystem paths before changing anything. Set `BLANK_REPO`, `BLANK_REF`, or `BLANK_SKIP_PACKAGES=1` to customise it. Use `BLANK_NONINTERACTIVE=1` for unattended setup. The installer copies a Mise binary found under a home directory to `/usr/local/bin/mise` so `ProtectHome=true` does not hide it from the service.
+The installer is interactive by default and confirms service paths plus bind addresses, TLS, ACME email, public URL, expected DNS addresses, secure cookies, and release retention before changing anything. Set `BLANK_REPO`, `BLANK_REF`, or `BLANK_SKIP_PACKAGES=1` to customise it. Use `BLANK_NONINTERACTIVE=1` and provide the corresponding environment variables for unattended setup. The installer copies a Mise binary found under a home directory to `/usr/local/bin/mise` so `ProtectHome=true` does not hide it from the service.
 
 ```sh
 sudo useradd --system --home-dir /var/lib/blank --create-home --shell /usr/sbin/nologin blank
@@ -192,7 +192,7 @@ sudo ./scripts/update.sh
 # or: sudo BLANK_REF=v1.2.0 ./scripts/update.sh
 ```
 
-The updater interactively lets you choose the release source or a pre-built binary URL and confirms before stopping the service. Set `BLANK_NONINTERACTIVE=1` for unattended updates.
+The updater interactively lets you choose the latest release, a source build, or a custom binary URL. It preserves the existing environment file and prompts for newly introduced or empty runtime settings before confirming the update. Set `BLANK_NONINTERACTIVE=1` for unattended updates that leave runtime configuration untouched.
 
 This produces files such as `/var/log/blank/2026-08-23.log` and rolls to a new path at midnight without restarting Blank. The configuration assumes rsyslog is already receiving systemd journal records, as it does on common Debian and Ubuntu installations. If no file appears, verify that rsyslog's `imjournal` input or journald-to-syslog forwarding is enabled before changing the Blank service.
 
