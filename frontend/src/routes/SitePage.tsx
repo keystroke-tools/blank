@@ -115,7 +115,10 @@ export function SitePage({ siteId }: { siteId: string }) {
 	return (
 		<AppShell>
 			<main className="mx-auto max-w-6xl px-6 py-12">
-				<Link to="/" className="text-sm text-muted hover:text-ink">
+				<Link
+					to="/dashboard"
+					className="text-sm text-muted hover:text-ink"
+				>
 					← Sites
 				</Link>
 				<div className="mt-10 flex flex-wrap items-end justify-between gap-5">
@@ -705,7 +708,7 @@ export function SiteSettings({ siteId }: { siteId: string }) {
 		onSuccess: async () => {
 			queryClient.removeQueries({ queryKey: queryKeys.site(siteId) })
 			await queryClient.invalidateQueries({ queryKey: queryKeys.sites })
-			await navigate({ to: '/' })
+			await navigate({ to: '/dashboard' })
 		},
 	})
 	const [tab, setTab] = useState<

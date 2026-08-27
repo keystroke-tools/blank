@@ -91,20 +91,22 @@ fn manifest(state: &AppState) -> Result<(String, String), ApiError> {
     let public_url = state.config.public_url.as_deref().ok_or_else(|| {
         ApiError::Conflict("BLANK_PUBLIC_URL must be configured before connecting GitHub".into())
     })?;
-    let value = serde_json::json!({
+    Ok((
+        "https://github.com/settings/apps/new".into(),
+        manifest_value(public_url).to_string(),
+    ))
+}
+
+fn manifest_value(public_url: &str) -> serde_json::Value {
+    serde_json::json!({
         "name": "Blank Deploy",
         "url": public_url,
         "redirect_url": format!("{public_url}/api/github/manifest/callback"),
         "hook_attributes": { "url": format!("{public_url}/api/webhooks/github"), "active": true },
-        "redirect_on_update": true,
         "public": false,
-        "default_permissions": { "contents": "read", "metadata": "read" },
-        "default_events": ["push", "installation", "installation_repositories"]
-    });
-    Ok((
-        "https://github.com/settings/apps/new".into(),
-        value.to_string(),
-    ))
+        "default_permissions": { "contents": "read" },
+        "default_events": ["push"]
+    })
 }
 
 async fn callback(
@@ -270,4 +272,30 @@ pub fn routes(config: &mut web::ServiceConfig) {
         .route("/github/connect", web::get().to(connect))
         .route("/github/manifest/callback", web::get().to(callback))
         .route("/github/repositories", web::get().to(repositories));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_matches_github_registration_schema() {
+        let value = manifest_value("https://blank.example.com");
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "name": "Blank Deploy",
+                "url": "https://blank.example.com",
+                "redirect_url": "https://blank.example.com/api/github/manifest/callback",
+                "hook_attributes": {
+                    "url": "https://blank.example.com/api/webhooks/github",
+                    "active": true
+                },
+                "public": false,
+                "default_permissions": { "contents": "read" },
+                "default_events": ["push"]
+            })
+        );
+    }
 }

@@ -668,6 +668,7 @@ export function SiteForm({
 							<DomainEditor
 								value={field.state.value}
 								onChange={field.handleChange}
+								protectedDomain={site?.default_domain}
 							/>
 						)}
 					</form.Field>

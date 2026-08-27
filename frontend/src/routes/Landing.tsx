@@ -1,9 +1,21 @@
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { api } from '../lib/api'
+import { queryKeys } from '../lib/query-client'
 
-export function Landing({ setupRequired }: { setupRequired: boolean }) {
+export function Landing() {
+	const { data } = useQuery({
+		queryKey: queryKeys.auth,
+		queryFn: api.authStatus,
+	})
+	const dashboardPath = data?.authenticated
+		? '/dashboard'
+		: data?.setup_required
+			? '/setup'
+			: '/login'
 	return (
 		<div className="min-h-screen overflow-hidden">
-			<PublicHeader setupRequired={setupRequired} />
+			<PublicHeader />
 			<main>
 				<section className="mx-auto grid max-w-6xl gap-14 px-6 py-20 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:py-28">
 					<div>
@@ -23,12 +35,14 @@ export function Landing({ setupRequired }: { setupRequired: boolean }) {
 						</p>
 						<div className="mt-9 flex flex-wrap gap-3">
 							<Link
-								to={setupRequired ? '/setup' : '/login'}
+								to={dashboardPath}
 								className="inline-flex h-11 items-center bg-primary px-5 text-sm font-semibold text-primary-ink"
 							>
-								{setupRequired
-									? 'Set up Blank'
-									: 'Open dashboard'}
+								{data?.authenticated
+									? 'Open dashboard'
+									: data?.setup_required
+										? 'Set up Blank'
+										: 'Open dashboard'}
 							</Link>
 							<Link
 								to="/docs"
@@ -94,7 +108,7 @@ export function Landing({ setupRequired }: { setupRequired: boolean }) {
 export function Docs() {
 	return (
 		<div className="min-h-screen">
-			<PublicHeader setupRequired={false} />
+			<PublicHeader />
 			<main className="mx-auto max-w-4xl px-6 py-16">
 				<p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
 					Documentation
@@ -148,7 +162,11 @@ export function Docs() {
 	)
 }
 
-function PublicHeader({ setupRequired }: { setupRequired: boolean }) {
+function PublicHeader() {
+	const { data } = useQuery({
+		queryKey: queryKeys.auth,
+		queryFn: api.authStatus,
+	})
 	return (
 		<header className="border-b border-border">
 			<div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -163,10 +181,20 @@ function PublicHeader({ setupRequired }: { setupRequired: boolean }) {
 						Docs
 					</Link>
 					<Link
-						to={setupRequired ? '/setup' : '/login'}
+						to={
+							data?.authenticated
+								? '/dashboard'
+								: data?.setup_required
+									? '/setup'
+									: '/login'
+						}
 						className="font-semibold text-primary"
 					>
-						{setupRequired ? 'Set up' : 'Sign in'}
+						{data?.authenticated
+							? 'Dashboard'
+							: data?.setup_required
+								? 'Set up'
+								: 'Sign in'}
 					</Link>
 				</nav>
 			</div>

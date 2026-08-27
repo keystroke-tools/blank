@@ -8,7 +8,7 @@ Blank was developed with assistance from large language models. Blank does not s
 
 Blank is not a container platform, a general-purpose PaaS, or a CI system.
 
-Unauthenticated visitors see a compact landing page at `/`, with introductory documentation available at `/docs`. Signed-in administrators continue directly to the site dashboard.
+The public landing page remains available at `/`, including while signed in. Introductory documentation is available at `/docs`, and the administrator dashboard lives at `/dashboard`.
 
 ## Development
 
@@ -85,6 +85,7 @@ BLANK_MISE_BIN=/usr/local/bin/mise
 BLANK_SECURE_COOKIES=true
 BLANK_RELEASE_RETENTION=5
 BLANK_EXPECTED_IPS=203.0.113.10
+BLANK_BASE_DOMAIN=pages.example.com
 BLANK_PUBLIC_URL=https://blank.example.com
 RUST_LOG=blank=info,actix_web=info
 ```
@@ -97,6 +98,8 @@ sudo chmod 0640 /etc/blank.env
 ```
 
 `BLANK_EXPECTED_IPS` is a comma-separated list used by domain checks. Set it to the public addresses that should receive site traffic. Keep `BLANK_SECURE_COOKIES=true` when the dashboard is served over HTTPS.
+
+Set `BLANK_BASE_DOMAIN` to give every site a stable generated hostname such as `project.pages.example.com`. Blank resolves naming collisions with numeric suffixes and keeps custom domains alongside the generated hostname. Point a wildcard DNS record such as `*.pages.example.com` at the addresses in `BLANK_EXPECTED_IPS`.
 
 Set `BLANK_PUBLIC_URL` to the externally accessible HTTPS origin of the Blank dashboard. The new-site page can then create a private GitHub App through GitHub's manifest flow. Install that App on selected repositories to browse public and private repositories, fetch them with short-lived installation tokens, and receive signed push events without configuring each repository webhook manually.
 

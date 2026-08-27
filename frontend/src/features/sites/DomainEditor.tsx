@@ -30,9 +30,11 @@ function wwwAlias(value: string) {
 export function DomainEditor({
 	value,
 	onChange,
+	protectedDomain,
 }: {
 	value: string[]
 	onChange: (domains: string[]) => void
+	protectedDomain?: string | null
 }) {
 	const auth = useQuery({
 		queryKey: queryKeys.auth,
@@ -73,8 +75,18 @@ export function DomainEditor({
 			event.preventDefault()
 			add()
 		}
-		if (event.key === 'Backspace' && !draft && value.length)
-			onChange(value.slice(0, -1))
+		if (event.key === 'Backspace' && !draft && value.length) {
+			let lastRemovable = value.length - 1
+			while (
+				lastRemovable >= 0 &&
+				value[lastRemovable] === protectedDomain
+			) {
+				lastRemovable -= 1
+			}
+			if (lastRemovable >= 0) {
+				onChange(value.filter((_, index) => index !== lastRemovable))
+			}
+		}
 	}
 	return (
 		<div className="sm:col-span-2">
@@ -98,27 +110,38 @@ export function DomainEditor({
 				)}
 			</div>
 			<div className="mt-3 flex min-h-12 flex-wrap items-center gap-2 border border-border bg-background p-2 focus-within:border-primary">
-				{value.map((domain) => (
-					<span
-						key={domain}
-						className="inline-flex h-8 items-center gap-2 bg-surface-muted px-3 text-xs"
-					>
-						<span>{domain}</span>
-						<button
-							type="button"
-							aria-label={`Remove ${domain}`}
-							onClick={() => {
-								onChange(
-									value.filter((item) => item !== domain),
-								)
-								dns.reset()
-							}}
-							className="text-muted hover:text-primary"
+				{value.map((domain) => {
+					const isProtected = domain === protectedDomain
+					return (
+						<span
+							key={domain}
+							className="inline-flex h-8 items-center gap-2 bg-surface-muted px-3 text-xs"
 						>
-							×
-						</button>
-					</span>
-				))}
+							<span>{domain}</span>
+							{isProtected ? (
+								<span className="border border-primary/40 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-primary">
+									Default
+								</span>
+							) : (
+								<button
+									type="button"
+									aria-label={`Remove ${domain}`}
+									onClick={() => {
+										onChange(
+											value.filter(
+												(item) => item !== domain,
+											),
+										)
+										dns.reset()
+									}}
+									className="text-muted hover:text-primary"
+								>
+									×
+								</button>
+							)}
+						</span>
+					)
+				})}
 				<input
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
@@ -140,6 +163,12 @@ export function DomainEditor({
 					</button>
 				)}
 			</div>
+			{protectedDomain && (
+				<p className="mt-2 text-xs text-muted">
+					The default hostname is managed by Blank and cannot be
+					removed.
+				</p>
+			)}
 			{error && <p className="mt-2 text-xs text-danger">{error}</p>}
 			{notice && <p className="mt-2 text-xs text-primary">{notice}</p>}
 			{dns.error && (

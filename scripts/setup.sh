@@ -20,6 +20,7 @@ BLANK_CHIMNEY_HTTPS_PORT="${BLANK_CHIMNEY_HTTPS_PORT:-}"
 BLANK_CHIMNEY_ACME_EMAIL="${BLANK_CHIMNEY_ACME_EMAIL:-}"
 BLANK_PUBLIC_URL="${BLANK_PUBLIC_URL:-}"
 BLANK_EXPECTED_IPS="${BLANK_EXPECTED_IPS:-}"
+BLANK_BASE_DOMAIN="${BLANK_BASE_DOMAIN:-}"
 BLANK_SECURE_COOKIES="${BLANK_SECURE_COOKIES:-true}"
 BLANK_RELEASE_RETENTION="${BLANK_RELEASE_RETENTION:-5}"
 BLANK_ROOT="$(mktemp -d /tmp/blank-setup.XXXXXX)"
@@ -44,6 +45,7 @@ if [[ -t 0 && "${BLANK_NONINTERACTIVE:-0}" != 1 ]]; then
   fi
   read -r -p "Public dashboard URL${BLANK_PUBLIC_URL:+ [$BLANK_PUBLIC_URL]}: " value; [[ -z "$value" ]] || BLANK_PUBLIC_URL="$value"
   read -r -p "Expected public IPs, comma-separated${BLANK_EXPECTED_IPS:+ [$BLANK_EXPECTED_IPS]}: " value; [[ -z "$value" ]] || BLANK_EXPECTED_IPS="$value"
+  read -r -p "Default site base domain${BLANK_BASE_DOMAIN:+ [$BLANK_BASE_DOMAIN]} (for example pages.example.com): " value; [[ -z "$value" ]] || BLANK_BASE_DOMAIN="$value"
   read -r -p "Secure cookies [$BLANK_SECURE_COOKIES]: " value; [[ -z "$value" ]] || BLANK_SECURE_COOKIES="$value"
   read -r -p "Successful releases to retain [$BLANK_RELEASE_RETENTION]: " value; [[ -z "$value" ]] || BLANK_RELEASE_RETENTION="$value"
   printf '\nRepository: %s\nRef: %s\nService user: %s\nData: %s\nInstall: %s\n' "$BLANK_REPO" "$BLANK_REF" "$BLANK_SERVICE_USER" "$BLANK_DATA_DIR" "$BLANK_INSTALL_DIR"
@@ -115,6 +117,7 @@ BLANK_SECURE_COOKIES=$BLANK_SECURE_COOKIES
 BLANK_RELEASE_RETENTION=$BLANK_RELEASE_RETENTION
 BLANK_PUBLIC_URL=$BLANK_PUBLIC_URL
 BLANK_EXPECTED_IPS=$BLANK_EXPECTED_IPS
+BLANK_BASE_DOMAIN=$BLANK_BASE_DOMAIN
 EOF
   chown root:"$BLANK_SERVICE_USER" "$BLANK_ENV_FILE"
   chmod 0640 "$BLANK_ENV_FILE"
@@ -134,6 +137,7 @@ ensure_env_value BLANK_SECURE_COOKIES "$BLANK_SECURE_COOKIES"
 ensure_env_value BLANK_RELEASE_RETENTION "$BLANK_RELEASE_RETENTION"
 ensure_env_value BLANK_PUBLIC_URL "$BLANK_PUBLIC_URL"
 ensure_env_value BLANK_EXPECTED_IPS "$BLANK_EXPECTED_IPS"
+ensure_env_value BLANK_BASE_DOMAIN "$BLANK_BASE_DOMAIN"
 
 install -d -o syslog -g adm -m 0750 /var/log/blank 2>/dev/null || install -d -m 0750 /var/log/blank
 cat >/etc/systemd/system/blank.service <<EOF
@@ -176,4 +180,4 @@ EOF
 systemctl daemon-reload
 systemctl enable --now blank.service
 systemctl restart rsyslog 2>/dev/null || true
-printf 'Blank is installed. Dashboard: http://127.0.0.1:8080\n'
+printf 'Blank is installed. Landing: http://127.0.0.1:8080\nDashboard: http://127.0.0.1:8080/dashboard\n'

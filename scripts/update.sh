@@ -68,6 +68,7 @@ if [[ -t 0 && "${BLANK_NONINTERACTIVE:-0}" != 1 ]]; then
     printf '\nChecking runtime configuration...\n'
     prompt_missing_env BLANK_PUBLIC_URL "Public dashboard URL"
     prompt_missing_env BLANK_EXPECTED_IPS "Expected public IPs, comma-separated"
+    prompt_missing_env BLANK_BASE_DOMAIN "Default site base domain (for example pages.example.com)"
     prompt_missing_env BLANK_SECURE_COOKIES "Secure cookies" "true"
     prompt_missing_env BLANK_RELEASE_RETENTION "Successful releases to retain" "5"
     prompt_missing_env BLANK_CHIMNEY_HTTPS_PORT "Site HTTPS port (blank keeps TLS disabled)"

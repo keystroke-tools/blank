@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
         .init();
     let config = Config::from_env()?;
     let db = db::connect(&config).await?;
+    sites::ensure_default_domains(&db, config.base_domain.as_deref()).await?;
     let analytics = analytics::Recorder::start(db.clone());
     deployment::recover_interrupted(&db).await?;
     let git = git::GitService::new(&config.data_dir);

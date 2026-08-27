@@ -19,13 +19,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 		<div className="min-h-screen">
 			<header className="border-b border-border">
 				<div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-					<Link to="/" className="flex items-center gap-3">
+					<Link to="/dashboard" className="flex items-center gap-3">
 						<span className="grid size-8 place-items-center bg-primary text-xs font-black text-primary-ink">
 							B
 						</span>
 						<span className="font-semibold">Blank</span>
 					</Link>
 					<div className="flex items-center gap-4">
+						<Link
+							to="/"
+							className="text-sm text-muted hover:text-ink"
+						>
+							Homepage
+						</Link>
 						<span className="hidden text-sm text-muted sm:block">
 							{data?.identifier}
 						</span>

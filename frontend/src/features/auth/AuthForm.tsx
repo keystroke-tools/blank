@@ -18,7 +18,7 @@ export function AuthForm({ mode }: { mode: 'setup' | 'login' }) {
 		onSuccess: async (status) => {
 			queryClient.setQueryData(queryKeys.auth, status)
 			await queryClient.invalidateQueries({ queryKey: queryKeys.sites })
-			await navigate({ to: '/', replace: true })
+			await navigate({ to: '/dashboard', replace: true })
 		},
 	})
 

@@ -6,7 +6,7 @@ Blank should feel like a deliberately tiny self-hosted Vercel/Netlify for static
 
 The application will be accessible at:
 
-`https://blank.thio.cloud`
+`https://blank.example.com`
 
 The primary deployment target is a Linux VM or LXC running on Proxmox.
 
@@ -1250,7 +1250,7 @@ Sites                                  + New Site
   main
   Deployed 4 minutes ago
 
-● example.thio.cloud
+● example-site.example.com
   aosasona/example
   main
   Deployed yesterday
@@ -1644,11 +1644,11 @@ Document the choice.
 
 ---
 
-# 45. HTTPS and blank.thio.cloud
+# 45. HTTPS and the Blank admin domain
 
 Blank's admin UI will ultimately be reachable at:
 
-`https://blank.thio.cloud`
+`https://blank.example.com`
 
 Do not hardcode this hostname deeply into application logic.
 
@@ -2244,7 +2244,7 @@ The first genuinely usable Blank version should pass this scenario.
 Given a clean Linux VM/LXC:
 
 1. install Blank
-2. access `https://blank.thio.cloud`
+2. access `https://blank.example.com`
 3. create the first administrator
 4. add a Git repository
 5. configure branch `main`

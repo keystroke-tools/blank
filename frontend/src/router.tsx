@@ -51,17 +51,16 @@ const rootRoute = createRootRoute({ component: Root })
 const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/',
-	component: () => {
-		const { data } = useQuery({
-			queryKey: queryKeys.auth,
-			queryFn: api.authStatus,
-		})
-		return data?.authenticated ? (
+	component: Landing,
+})
+const dashboardRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/dashboard',
+	component: () => (
+		<RequireAuth>
 			<Dashboard />
-		) : (
-			<Landing setupRequired={Boolean(data?.setup_required)} />
-		)
-	},
+		</RequireAuth>
+	),
 })
 const docsRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -78,8 +77,10 @@ const setupRoute = createRoute({
 		})
 		return data?.setup_required ? (
 			<AuthForm mode="setup" />
+		) : data?.authenticated ? (
+			<Navigate to="/dashboard" />
 		) : (
-			<Navigate to="/" />
+			<Navigate to="/login" />
 		)
 	},
 })
@@ -91,8 +92,10 @@ const loginRoute = createRoute({
 			queryKey: queryKeys.auth,
 			queryFn: api.authStatus,
 		})
-		return data?.authenticated || data?.setup_required ? (
-			<Navigate to="/" />
+		return data?.authenticated ? (
+			<Navigate to="/dashboard" />
+		) : data?.setup_required ? (
+			<Navigate to="/setup" />
 		) : (
 			<AuthForm mode="login" />
 		)
@@ -171,6 +174,7 @@ const deploymentRoute = createRoute({
 export const router = createRouter({
 	routeTree: rootRoute.addChildren([
 		indexRoute,
+		dashboardRoute,
 		docsRoute,
 		setupRoute,
 		loginRoute,

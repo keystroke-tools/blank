@@ -26,6 +26,7 @@ struct SiteRow {
     publish_directory: String,
     build_enabled: bool,
     auto_deploy: bool,
+    default_domain: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -102,6 +103,106 @@ fn normalized_domains(domains: &[String]) -> Result<Vec<String>, ApiError> {
         }
     }
     Ok(result)
+}
+
+fn site_slug(name: &str) -> String {
+    let mut slug = String::new();
+    for character in name.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "site".into()
+    } else {
+        slug.chars()
+            .take(48)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_owned()
+    }
+}
+
+async fn allocate_default_domain(
+    db: &sqlx::SqlitePool,
+    name: &str,
+    base: Option<&str>,
+    current_site: Option<&str>,
+) -> Result<Option<String>, ApiError> {
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let slug = site_slug(name);
+    for suffix in 1..=10_000 {
+        let suffix = if suffix == 1 {
+            String::new()
+        } else {
+            format!("-{suffix}")
+        };
+        let max_label_len = 63_usize.min(252_usize.saturating_sub(base.len()));
+        let stem_len = max_label_len.saturating_sub(suffix.len());
+        if stem_len == 0 {
+            return Err(ApiError::BadRequest(
+                "base domain is too long for generated site hostnames".into(),
+            ));
+        }
+        let stem = slug
+            .trim_end_matches('-')
+            .chars()
+            .take(stem_len)
+            .collect::<String>();
+        let stem = stem.trim_end_matches('-');
+        let label = format!("{stem}{suffix}");
+        let domain = format!("{label}.{base}");
+        let used: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM site_domains WHERE domain=? AND (? IS NULL OR site_id<>?)",
+        )
+        .bind(&domain)
+        .bind(current_site)
+        .bind(current_site)
+        .fetch_one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+        if used == 0 {
+            return Ok(Some(domain));
+        }
+    }
+    Err(ApiError::Conflict(
+        "could not allocate a default site domain".into(),
+    ))
+}
+
+pub async fn ensure_default_domains(
+    db: &sqlx::SqlitePool,
+    base: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(base) = base else {
+        return Ok(());
+    };
+    let sites: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM sites WHERE default_domain IS NULL")
+            .fetch_all(db)
+            .await?;
+    for (id, name) in sites {
+        if let Some(domain) = allocate_default_domain(db, &name, Some(base), Some(&id)).await? {
+            let mut tx = db.begin().await?;
+            sqlx::query("UPDATE sites SET default_domain=? WHERE id=?")
+                .bind(&domain)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("INSERT OR IGNORE INTO site_domains (site_id, domain) VALUES (?, ?)")
+                .bind(&id)
+                .bind(&domain)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn normalized_mise_tools(value: &str) -> Result<String, ApiError> {
@@ -187,7 +288,7 @@ async fn domains_for(state: &AppState, site_id: &str) -> Result<Vec<String>, Api
 }
 
 async fn load_site(state: &AppState, id: &str) -> Result<Site, ApiError> {
-    let row = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites WHERE id = ?")
+    let row = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, default_domain, created_at, updated_at FROM sites WHERE id = ?")
         .bind(id).fetch_optional(&state.db).await.context("failed to load site")?
         .ok_or_else(|| ApiError::NotFound("site not found".into()))?;
     let domains = domains_for(state, id).await?;
@@ -229,7 +330,7 @@ async fn replace_domains(
 
 pub async fn list(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, false).await?;
-    let rows = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, created_at, updated_at FROM sites ORDER BY name")
+    let rows = sqlx::query_as::<_, SiteRow>("SELECT id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, default_domain, created_at, updated_at FROM sites ORDER BY name")
         .fetch_all(&state.db).await.context("failed to list sites")?;
     let mut sites = Vec::with_capacity(rows.len());
     for row in rows {
@@ -254,17 +355,29 @@ pub async fn create(
     input: web::Json<SiteInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, true).await?;
-    let domains = validate(&input)?;
+    let mut domains = validate(&input)?;
     let id = Uuid::new_v4().to_string();
+    let default_domain = allocate_default_domain(
+        &state.db,
+        input.name.trim(),
+        state.config.base_domain.as_deref(),
+        None,
+    )
+    .await?;
+    if let Some(domain) = &default_domain
+        && !domains.contains(domain)
+    {
+        domains.push(domain.clone());
+    }
     let mut tx = state
         .db
         .begin()
         .await
         .context("failed to begin site creation")?;
-    let result = sqlx::query("INSERT INTO sites (id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    let result = sqlx::query("INSERT INTO sites (id, name, repository_url, branch, project_directory, mise_tools, detected_framework, install_command, build_command, publish_directory, build_enabled, auto_deploy, default_domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&id).bind(input.name.trim()).bind(input.repository_url.trim()).bind(input.branch.trim())
         .bind(input.project_directory.trim()).bind(normalized_mise_tools(&input.mise_tools)?).bind(clean_optional(&input.detected_framework)).bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command))
-        .bind(input.publish_directory.trim()).bind(input.build_enabled).bind(input.auto_deploy).execute(&mut *tx).await;
+        .bind(input.publish_directory.trim()).bind(input.build_enabled).bind(input.auto_deploy).bind(&default_domain).execute(&mut *tx).await;
     if let Err(error) = result {
         if error
             .as_database_error()
@@ -293,16 +406,40 @@ pub async fn update(
     input: web::Json<SiteInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, true).await?;
-    let domains = validate(&input)?;
+    let mut domains = validate(&input)?;
+    let existing_default: Option<String> =
+        sqlx::query_scalar("SELECT default_domain FROM sites WHERE id=?")
+            .bind(id.as_str())
+            .fetch_optional(&state.db)
+            .await
+            .context("failed to load default domain")?
+            .flatten();
+    let default_domain = match existing_default {
+        Some(domain) => Some(domain),
+        None => {
+            allocate_default_domain(
+                &state.db,
+                input.name.trim(),
+                state.config.base_domain.as_deref(),
+                Some(id.as_str()),
+            )
+            .await?
+        }
+    };
+    if let Some(domain) = &default_domain
+        && !domains.contains(domain)
+    {
+        domains.push(domain.clone());
+    }
     let mut tx = state
         .db
         .begin()
         .await
         .context("failed to begin site update")?;
-    let result = sqlx::query("UPDATE sites SET name = ?, repository_url = ?, branch = ?, project_directory = ?, mise_tools = ?, detected_framework = ?, install_command = ?, build_command = ?, publish_directory = ?, build_enabled = ?, auto_deploy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    let result = sqlx::query("UPDATE sites SET name = ?, repository_url = ?, branch = ?, project_directory = ?, mise_tools = ?, detected_framework = ?, install_command = ?, build_command = ?, publish_directory = ?, build_enabled = ?, auto_deploy = ?, default_domain = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(input.name.trim()).bind(input.repository_url.trim()).bind(input.branch.trim()).bind(input.project_directory.trim())
         .bind(normalized_mise_tools(&input.mise_tools)?).bind(clean_optional(&input.detected_framework)).bind(clean_optional(&input.install_command)).bind(clean_optional(&input.build_command)).bind(input.publish_directory.trim())
-        .bind(input.build_enabled).bind(input.auto_deploy).bind(id.as_str()).execute(&mut *tx).await;
+        .bind(input.build_enabled).bind(input.auto_deploy).bind(&default_domain).bind(id.as_str()).execute(&mut *tx).await;
     let result = match result {
         Ok(result) => result,
         Err(error)
@@ -402,6 +539,14 @@ mod tests {
         let mut value = input(".", "dist");
         value.domains = vec!["Docs.Example.com.".into(), "docs.example.com".into()];
         assert_eq!(validate(&value).unwrap(), vec!["docs.example.com"]);
+    }
+
+    #[test]
+    fn creates_dns_safe_site_slugs() {
+        assert_eq!(site_slug("My Project"), "my-project");
+        assert_eq!(site_slug("  docs___site!!! "), "docs-site");
+        assert_eq!(site_slug("🚀"), "site");
+        assert!(!site_slug(&format!("{} b", "a".repeat(47))).ends_with('-'));
     }
 
     #[test]

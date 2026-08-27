@@ -20,12 +20,16 @@ export type Site = {
 	publish_directory: string
 	build_enabled: boolean
 	auto_deploy: boolean
+	default_domain: string | null
 	domains: string[]
 	created_at: string
 	updated_at: string
 }
 
-export type SiteInput = Omit<Site, 'id' | 'created_at' | 'updated_at'>
+export type SiteInput = Omit<
+	Site,
+	'id' | 'created_at' | 'updated_at' | 'default_domain'
+>
 
 export type RemoteInspection = {
 	default_branch: string | null

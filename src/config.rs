@@ -20,6 +20,7 @@ pub struct Config {
     pub mise_bin: Option<PathBuf>,
     pub webhook_secret: Option<String>,
     pub public_url: Option<String>,
+    pub base_domain: Option<String>,
 }
 
 impl Config {
@@ -83,6 +84,25 @@ impl Config {
             .ok()
             .map(|value| value.trim_end_matches('/').to_owned())
             .filter(|value| !value.is_empty());
+        let base_domain = env::var("BLANK_BASE_DOMAIN")
+            .ok()
+            .map(|value| value.trim().trim_matches('.').to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        if base_domain.as_ref().is_some_and(|domain| {
+            domain.len() > 253
+                || !domain.contains('.')
+                || domain.split('.').any(|label| {
+                    label.is_empty()
+                        || label.len() > 63
+                        || label.starts_with('-')
+                        || label.ends_with('-')
+                        || !label
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                })
+        }) {
+            anyhow::bail!("BLANK_BASE_DOMAIN must be a valid base domain");
+        }
         if chimney_https_port.is_some() && chimney_acme_email.is_none() {
             anyhow::bail!("BLANK_CHIMNEY_ACME_EMAIL is required when Chimney HTTPS is enabled");
         }
@@ -99,6 +119,7 @@ impl Config {
             mise_bin,
             webhook_secret,
             public_url,
+            base_domain,
         })
     }
 }
