@@ -341,9 +341,11 @@ Those are outside project scope.
 
 # 7. Authentication
 
-Initially support exactly one Blank administrator.
+Support a small set of Blank administrators. The first administrator can add
+more administrators after setup.
 
-Do not build multi-user auth, teams, organisations, invitations, billing, or RBAC.
+Do not build teams, organisations, invitations, billing, or RBAC. Every
+administrator has the same full access.
 
 On first startup:
 

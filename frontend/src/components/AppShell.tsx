@@ -27,6 +27,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 					</Link>
 					<div className="flex items-center gap-4">
 						<Link
+							to="/users"
+							className="text-sm text-muted hover:text-ink"
+						>
+							Users
+						</Link>
+						<Link
 							to="/"
 							className="text-sm text-muted hover:text-ink"
 						>
@@ -42,10 +48,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 				</div>
 			</header>
 			{children}
-			<footer className="mx-auto max-w-6xl px-6 py-8 text-xs text-muted">
-				LLM disclosure: Blank was developed with assistance from large
-				language models.
-			</footer>
 		</div>
 	)
 }

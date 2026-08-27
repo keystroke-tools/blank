@@ -16,6 +16,7 @@ import { DeploymentPage, SitePage, SiteSettings } from './routes/SitePage'
 import { SiteConfiguration } from './routes/SiteConfiguration'
 import { SiteAnalytics } from './routes/SiteAnalytics'
 import { Docs, Landing } from './routes/Landing'
+import { Users } from './routes/Users'
 
 function Root() {
 	const auth = useQuery({
@@ -66,6 +67,15 @@ const docsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/docs',
 	component: Docs,
+})
+const usersRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/users',
+	component: () => (
+		<RequireAuth>
+			<Users />
+		</RequireAuth>
+	),
 })
 const setupRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -176,6 +186,7 @@ export const router = createRouter({
 		indexRoute,
 		dashboardRoute,
 		docsRoute,
+		usersRoute,
 		setupRoute,
 		loginRoute,
 		newSiteRoute,

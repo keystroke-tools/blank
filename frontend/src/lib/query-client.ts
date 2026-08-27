@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query'
 
 export const queryKeys = {
 	auth: ['auth'] as const,
+	administrators: ['administrators'] as const,
 	health: ['health'] as const,
 	sites: ['sites'] as const,
 	site: (id: string) => ['sites', id] as const,

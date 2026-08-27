@@ -1,4 +1,5 @@
 use actix_web::{HttpRequest, HttpResponse, http::header, web};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,12 @@ struct AppConfig {
 #[derive(Deserialize)]
 struct ManifestCallback {
     code: String,
+    state: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ConnectQuery {
+    return_to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,9 +84,16 @@ async fn status(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResp
     }))
 }
 
-async fn connect(req: HttpRequest, state: web::Data<AppState>) -> Result<HttpResponse, ApiError> {
+async fn connect(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    query: web::Query<ConnectQuery>,
+) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, false).await?;
-    let (action, manifest) = manifest(&state)?;
+    let (mut action, manifest) = manifest(&state)?;
+    let return_to = safe_return_path(query.return_to.as_deref());
+    action.push_str("?state=");
+    action.push_str(&URL_SAFE_NO_PAD.encode(return_to));
     let escaped = manifest
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -109,6 +123,16 @@ fn manifest_value(public_url: &str) -> serde_json::Value {
     })
 }
 
+fn safe_return_path(value: Option<&str>) -> &str {
+    value
+        .filter(|path| {
+            (*path == "/dashboard" || path.starts_with("/sites/"))
+                && !path.starts_with("//")
+                && !path.contains(['\\', '\r', '\n'])
+        })
+        .unwrap_or("/dashboard")
+}
+
 async fn callback(
     req: HttpRequest,
     state: web::Data<AppState>,
@@ -134,8 +158,16 @@ async fn callback(
     let app: ManifestResponse = response.json().await.map_err(anyhow::Error::from)?;
     sqlx::query("INSERT INTO github_app_config (id, app_id, app_slug, client_id, client_secret, webhook_secret, private_key_pem) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id, app_slug=excluded.app_slug, client_id=excluded.client_id, client_secret=excluded.client_secret, webhook_secret=excluded.webhook_secret, private_key_pem=excluded.private_key_pem, updated_at=CURRENT_TIMESTAMP")
         .bind(app.id).bind(app.slug).bind(app.client_id).bind(app.client_secret).bind(app.webhook_secret).bind(app.pem).execute(&state.db).await.map_err(anyhow::Error::from)?;
+    let return_to = query
+        .state
+        .as_deref()
+        .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
+        .and_then(|value| String::from_utf8(value).ok());
     Ok(HttpResponse::SeeOther()
-        .insert_header((header::LOCATION, "/sites/new?github=connected"))
+        .insert_header((
+            header::LOCATION,
+            safe_return_path(return_to.as_deref()).to_owned(),
+        ))
         .finish())
 }
 
@@ -297,5 +329,16 @@ mod tests {
                 "default_events": ["push"]
             })
         );
+    }
+
+    #[test]
+    fn github_return_paths_stay_inside_the_admin_app() {
+        assert_eq!(safe_return_path(Some("/dashboard")), "/dashboard");
+        assert_eq!(
+            safe_return_path(Some("/sites/site-id/settings")),
+            "/sites/site-id/settings"
+        );
+        assert_eq!(safe_return_path(Some("//example.com")), "/dashboard");
+        assert_eq!(safe_return_path(Some("https://example.com")), "/dashboard");
     }
 }

@@ -7,6 +7,13 @@ export type AuthStatus = {
 
 type Credentials = { identifier: string; password: string }
 
+export type Administrator = {
+	id: number
+	identifier: string
+	created_at: string
+	is_current: boolean
+}
+
 export type Site = {
 	id: string
 	name: string
@@ -216,6 +223,13 @@ export const api = {
 		request<void>('/auth/logout', {
 			method: 'POST',
 			headers: { 'x-csrf-token': csrfToken },
+		}),
+	administrators: () => request<Administrator[]>('/auth/administrators'),
+	createAdministrator: (credentials: Credentials, csrfToken: string) =>
+		request<Administrator>('/auth/administrators', {
+			method: 'POST',
+			headers: { 'x-csrf-token': csrfToken },
+			body: JSON.stringify(credentials),
 		}),
 	sites: () => request<Site[]>('/sites'),
 	site: (id: string) => request<Site>(`/sites/${id}`),

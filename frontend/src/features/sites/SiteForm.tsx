@@ -145,8 +145,18 @@ export function SiteForm({
 		defaultValues: initial(site),
 		onSubmit: ({ value }) => mutation.mutateAsync(value),
 	})
+	type DetectionTarget = {
+		repository_url: string
+		branch: string
+		project_directory: string
+	}
+	const currentDetectionTarget = (): DetectionTarget => ({
+		repository_url: form.getFieldValue('repository_url'),
+		branch: form.getFieldValue('branch'),
+		project_directory: form.getFieldValue('project_directory'),
+	})
 	const applySuggestions = (
-		result: Awaited<ReturnType<typeof api.detectBuild>>,
+		result: Awaited<ReturnType<typeof api.detectDraftBuild>>,
 	) => {
 		form.setFieldValue('mise_tools', result.tools.join('\n'))
 		form.setFieldValue('detected_framework', result.detected_framework)
@@ -156,34 +166,27 @@ export function SiteForm({
 		form.setFieldValue('build_enabled', Boolean(result.build_command))
 	}
 	const detection = useMutation({
-		mutationFn: () =>
-			site
-				? api.detectBuild(site.id, auth.data?.csrf_token ?? '')
-				: api.detectDraftBuild(
-						{
-							repository_url:
-								form.getFieldValue('repository_url'),
-							branch: form.getFieldValue('branch'),
-							project_directory:
-								form.getFieldValue('project_directory'),
-						},
-						auth.data?.csrf_token ?? '',
-					),
+		mutationFn: (target?: DetectionTarget) =>
+			api.detectDraftBuild(
+				target ?? currentDetectionTarget(),
+				auth.data?.csrf_token ?? '',
+			),
 		onSuccess: applySuggestions,
 	})
 	const inspection = useMutation({
-		mutationFn: () =>
+		mutationFn: (target?: DetectionTarget) =>
 			api.inspectRepository(
-				form.getFieldValue('repository_url'),
+				target?.repository_url ?? form.getFieldValue('repository_url'),
 				auth.data?.csrf_token ?? '',
 			),
-		onSuccess: async (result) => {
-			if (
-				result.default_branch &&
-				form.getFieldValue('branch') === 'main'
-			)
-				form.setFieldValue('branch', result.default_branch)
-			await detection.mutateAsync()
+		onSuccess: async (result, target) => {
+			const selected = target ?? currentDetectionTarget()
+			const branch =
+				result.default_branch && selected.branch === 'main'
+					? result.default_branch
+					: selected.branch
+			if (branch !== selected.branch) form.setFieldValue('branch', branch)
+			await detection.mutateAsync({ ...selected, branch })
 		},
 	})
 	const showProject = section === 'all' || section === 'project'
@@ -209,92 +212,117 @@ export function SiteForm({
 							this project.
 						</p>
 					</div>
-					{!site && (
-						<div className="border border-border bg-background p-4">
-							<div className="flex flex-wrap items-center justify-between gap-3">
-								<div>
-									<p className="text-sm font-semibold">
-										GitHub
-									</p>
-									<p className="mt-1 text-xs text-muted">
-										Connect once to browse private
-										repositories and configure push
-										deployments automatically.
-									</p>
-								</div>
-								{github.data?.connected ? (
-									<a
-										href={github.data.install_url ?? '#'}
-										className="inline-flex h-10 items-center border border-border px-4 text-xs font-semibold hover:border-primary"
-									>
-										Manage repositories
-									</a>
-								) : (
-									<a
-										href="/api/github/connect"
-										className="inline-flex h-10 items-center bg-primary px-4 text-xs font-semibold text-primary-ink"
-									>
-										Connect GitHub
-									</a>
-								)}
+					<div className="border border-border bg-background p-4">
+						<div className="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<p className="text-sm font-semibold">GitHub</p>
+								<p className="mt-1 text-xs text-muted">
+									Connect once to browse private repositories
+									and configure push deployments
+									automatically.
+								</p>
 							</div>
-							{github.data?.connected && (
-								<select
-									className="mt-4 h-11 w-full border border-border bg-surface px-3 text-sm"
-									defaultValue=""
-									onChange={(event) => {
-										const repository =
-											githubRepositories.data?.find(
-												(item) =>
-													String(item.id) ===
-													event.target.value,
-											)
-										if (!repository) return
-										form.setFieldValue(
-											'repository_url',
-											repository.clone_url,
+							{github.data?.connected ? (
+								<a
+									href={github.data.install_url ?? '#'}
+									className="inline-flex h-10 items-center border border-border px-4 text-xs font-semibold hover:border-primary"
+								>
+									Manage repositories
+								</a>
+							) : (
+								<a
+									href={`/api/github/connect?return_to=${encodeURIComponent(site ? `/sites/${site.id}/settings` : '/sites/new')}`}
+									className="inline-flex h-10 items-center bg-primary px-4 text-xs font-semibold text-primary-ink"
+								>
+									Connect GitHub
+								</a>
+							)}
+						</div>
+						{github.isError && (
+							<p className="mt-3 text-xs text-danger">
+								{github.error.message}
+							</p>
+						)}
+						{github.data?.connected && (
+							<select
+								className="mt-4 h-11 w-full border border-border bg-surface px-3 text-sm"
+								defaultValue=""
+								onChange={(event) => {
+									const repository =
+										githubRepositories.data?.find(
+											(item) =>
+												String(item.id) ===
+												event.target.value,
 										)
-										form.setFieldValue(
-											'branch',
-											repository.default_branch,
-										)
+									if (!repository) return
+									form.setFieldValue(
+										'repository_url',
+										repository.clone_url,
+									)
+									form.setFieldValue(
+										'branch',
+										repository.default_branch,
+									)
+									if (!site) {
 										form.setFieldValue(
 											'name',
 											repositoryName(
 												repository.full_name,
 											),
 										)
-										form.setFieldValue('auto_deploy', true)
-										setPrivateRepository(repository.private)
-									}}
-								>
-									<option value="">
-										Select a GitHub repository
+									}
+									form.setFieldValue('auto_deploy', true)
+									setPrivateRepository(repository.private)
+									inspection.mutate({
+										repository_url: repository.clone_url,
+										branch: repository.default_branch,
+										project_directory:
+											form.getFieldValue(
+												'project_directory',
+											),
+									})
+								}}
+							>
+								<option value="">
+									Select a GitHub repository
+								</option>
+								{githubRepositories.data?.map((repository) => (
+									<option
+										key={repository.id}
+										value={repository.id}
+									>
+										{repository.full_name}
+										{repository.private ? ' (private)' : ''}
 									</option>
-									{githubRepositories.data?.map(
-										(repository) => (
-											<option
-												key={repository.id}
-												value={repository.id}
-											>
-												{repository.full_name}
-												{repository.private
-													? ' (private)'
-													: ''}
-											</option>
-										),
-									)}
-								</select>
+								))}
+							</select>
+						)}
+						{(inspection.isPending || detection.isPending) && (
+							<p
+								role="status"
+								className="mt-3 text-xs text-primary"
+							>
+								Inspecting the repository and filling in project
+								settings…
+							</p>
+						)}
+						{(inspection.error || detection.error) && (
+							<p
+								role="alert"
+								className="mt-3 text-xs text-danger"
+							>
+								{inspection.error?.message ??
+									detection.error?.message}
+							</p>
+						)}
+						{github.data?.connected &&
+							githubRepositories.data?.length === 0 && (
+								<p className="mt-3 text-xs text-muted">
+									Install the GitHub App on at least one
+									repository, then refresh this page.
+								</p>
 							)}
-							{github.data?.connected &&
-								githubRepositories.data?.length === 0 && (
-									<p className="mt-3 text-xs text-muted">
-										Install the GitHub App on at least one
-										repository, then refresh this page.
-									</p>
-								)}
-						</div>
-					)}
+					</div>
 					<form.Field
 						name="name"
 						validators={{ onBlur: required('Site name', 100) }}
@@ -359,7 +387,9 @@ export function SiteForm({
 												inspection.isPending ||
 												detection.isPending
 											}
-											onClick={() => inspection.mutate()}
+											onClick={() =>
+												inspection.mutate(undefined)
+											}
 											className="-ml-px inline-flex h-11 shrink-0 items-center gap-2 border border-border bg-background px-4 text-xs font-semibold text-primary transition hover:border-primary disabled:text-muted"
 										>
 											<svg
@@ -557,7 +587,7 @@ export function SiteForm({
 							<Button
 								type="button"
 								tone="quiet"
-								onClick={() => detection.mutate()}
+								onClick={() => detection.mutate(undefined)}
 								disabled={detection.isPending}
 							>
 								{detection.isPending

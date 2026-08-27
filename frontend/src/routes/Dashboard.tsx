@@ -9,6 +9,10 @@ export function Dashboard() {
 	const [tab, setTab] = useState<'all' | 'published' | 'setup'>('all')
 	const [search, setSearch] = useState('')
 	const sites = useQuery({ queryKey: queryKeys.sites, queryFn: api.sites })
+	const github = useQuery({
+		queryKey: ['github-status'],
+		queryFn: api.githubStatus,
+	})
 	const filteredSites = useMemo(() => {
 		const needle = search.trim().toLowerCase()
 		return (
@@ -52,6 +56,38 @@ export function Dashboard() {
 						<span className="text-lg leading-none">+</span> New site
 					</Link>
 				</div>
+				<section className="mt-8 flex flex-wrap items-center justify-between gap-4 border border-border bg-surface px-5 py-4">
+					<div>
+						<p className="text-sm font-semibold">
+							GitHub integration
+						</p>
+						<p className="mt-1 text-xs text-muted">
+							{github.data?.connected
+								? `Connected as ${github.data.app_slug}. Install or update repository access at any time.`
+								: 'Connect GitHub after setup to link existing sites, access private repositories, and receive push deployments.'}
+						</p>
+						{github.isError && (
+							<p className="mt-2 text-xs text-danger">
+								{github.error.message}
+							</p>
+						)}
+					</div>
+					{github.data?.connected ? (
+						<a
+							href={github.data.install_url ?? '#'}
+							className="inline-flex h-10 items-center border border-border px-4 text-xs font-semibold hover:border-primary"
+						>
+							Manage repositories
+						</a>
+					) : (
+						<a
+							href="/api/github/connect?return_to=%2Fdashboard"
+							className="inline-flex h-10 items-center bg-primary px-4 text-xs font-semibold text-primary-ink"
+						>
+							Connect GitHub
+						</a>
+					)}
+				</section>
 				{sites.isPending && <LoadingGrid />}
 				{sites.isError && (
 					<p

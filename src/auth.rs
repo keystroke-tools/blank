@@ -33,7 +33,16 @@ pub struct Credentials {
     password: String,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Administrator {
+    id: i64,
+    identifier: String,
+    created_at: String,
+    is_current: bool,
+}
+
 pub(crate) struct Session {
+    pub administrator_id: i64,
     pub identifier: String,
     pub csrf_token: String,
 }
@@ -49,9 +58,10 @@ fn token_hash(token: &str) -> Vec<u8> {
 }
 
 fn validate_credentials(input: &Credentials) -> Result<(), ApiError> {
-    if input.identifier.trim().len() < 3 {
+    let identifier = input.identifier.trim();
+    if identifier.len() < 3 || identifier.len() > 254 || identifier.chars().any(char::is_control) {
         return Err(ApiError::BadRequest(
-            "identifier must be at least 3 characters".into(),
+            "identifier must be between 3 and 254 characters".into(),
         ));
     }
     if input.password.len() < 12 {
@@ -62,14 +72,26 @@ fn validate_credentials(input: &Credentials) -> Result<(), ApiError> {
     Ok(())
 }
 
+async fn hash_password(password: String) -> Result<String, ApiError> {
+    web::block(move || {
+        Argon2::default()
+            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+            .map(|hash| hash.to_string())
+    })
+    .await
+    .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?
+    .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))
+}
+
 async fn current_session(req: &HttpRequest, db: &SqlitePool) -> Result<Option<Session>, ApiError> {
     let Some(cookie) = req.cookie(SESSION_COOKIE) else {
         return Ok(None);
     };
-    let row = sqlx::query("SELECT a.identifier, s.csrf_token FROM sessions s JOIN administrators a ON a.id = s.administrator_id WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP")
+    let row = sqlx::query("SELECT a.id AS administrator_id, a.identifier, s.csrf_token FROM sessions s JOIN administrators a ON a.id = s.administrator_id WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP")
         .bind(token_hash(cookie.value())).fetch_optional(db).await
         .context("failed to load session")?;
     Ok(row.map(|row| Session {
+        administrator_id: row.get("administrator_id"),
         identifier: row.get("identifier"),
         csrf_token: row.get("csrf_token"),
     }))
@@ -105,12 +127,15 @@ fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
         .finish()
 }
 
-async fn create_session(db: &SqlitePool) -> Result<(String, String), ApiError> {
+async fn create_session(
+    db: &SqlitePool,
+    administrator_id: i64,
+) -> Result<(String, String), ApiError> {
     let token = random_token();
     let csrf = random_token();
     let expires = Utc::now() + ChronoDuration::days(7);
-    sqlx::query("INSERT INTO sessions (token_hash, administrator_id, csrf_token, expires_at) VALUES (?, 1, ?, ?)")
-        .bind(token_hash(&token)).bind(&csrf).bind(expires).execute(db).await
+    sqlx::query("INSERT INTO sessions (token_hash, administrator_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)")
+        .bind(token_hash(&token)).bind(administrator_id).bind(&csrf).bind(expires).execute(db).await
         .context("failed to create session")?;
     Ok((token, csrf))
 }
@@ -137,15 +162,7 @@ pub async fn setup(
     input: web::Json<Credentials>,
 ) -> Result<HttpResponse, ApiError> {
     validate_credentials(&input)?;
-    let password = input.password.clone();
-    let hash = web::block(move || {
-        Argon2::default()
-            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-            .map(|h| h.to_string())
-    })
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+    let hash = hash_password(input.password.clone()).await?;
     let inserted = sqlx::query("INSERT INTO administrators (id, identifier, password_hash) VALUES (1, ?, ?) ON CONFLICT DO NOTHING")
         .bind(input.identifier.trim()).bind(hash).execute(&state.db).await.context("failed to create administrator")?;
     if inserted.rows_affected() == 0 {
@@ -153,7 +170,7 @@ pub async fn setup(
             "setup has already been completed".into(),
         ));
     }
-    let (token, csrf_token) = create_session(&state.db).await?;
+    let (token, csrf_token) = create_session(&state.db, 1).await?;
     Ok(HttpResponse::Created()
         .cookie(session_cookie(token, state.config.secure_cookies))
         .json(AuthStatus {
@@ -169,7 +186,7 @@ pub async fn login(
     input: web::Json<Credentials>,
 ) -> Result<HttpResponse, ApiError> {
     let Some(row) =
-        sqlx::query("SELECT identifier, password_hash FROM administrators WHERE identifier = ?")
+        sqlx::query("SELECT id, identifier, password_hash FROM administrators WHERE identifier = ? COLLATE NOCASE")
             .bind(input.identifier.trim())
             .fetch_optional(&state.db)
             .await
@@ -193,7 +210,8 @@ pub async fn login(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return Err(ApiError::Unauthorized);
     }
-    let (token, csrf_token) = create_session(&state.db).await?;
+    let administrator_id: i64 = row.get("id");
+    let (token, csrf_token) = create_session(&state.db, administrator_id).await?;
     Ok(HttpResponse::Ok()
         .cookie(session_cookie(token, state.config.secure_cookies))
         .json(AuthStatus {
@@ -202,6 +220,63 @@ pub async fn login(
             identifier: Some(row.get("identifier")),
             csrf_token: Some(csrf_token),
         }))
+}
+
+pub async fn list_administrators(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<HttpResponse, ApiError> {
+    let session = require_session(&req, &state.db, false).await?;
+    let administrators = sqlx::query_as::<_, Administrator>(
+        "SELECT id, identifier, created_at, id = ? AS is_current FROM administrators ORDER BY identifier COLLATE NOCASE",
+    )
+    .bind(session.administrator_id)
+    .fetch_all(&state.db)
+    .await
+    .context("failed to list administrators")?;
+    Ok(HttpResponse::Ok().json(administrators))
+}
+
+pub async fn create_administrator(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    input: web::Json<Credentials>,
+) -> Result<HttpResponse, ApiError> {
+    require_session(&req, &state.db, true).await?;
+    validate_credentials(&input)?;
+    let identifier = input.identifier.trim();
+    let hash = hash_password(input.password.clone()).await?;
+    let result =
+        sqlx::query("INSERT INTO administrators (identifier, password_hash) VALUES (?, ?)")
+            .bind(identifier)
+            .bind(hash)
+            .execute(&state.db)
+            .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error)
+            if error
+                .as_database_error()
+                .is_some_and(|error| error.is_unique_violation()) =>
+        {
+            return Err(ApiError::Conflict(
+                "an administrator with that identifier already exists".into(),
+            ));
+        }
+        Err(error) => {
+            return Err(ApiError::Internal(
+                anyhow::Error::new(error).context("failed to create administrator"),
+            ));
+        }
+    };
+    let administrator = sqlx::query_as::<_, Administrator>(
+        "SELECT id, identifier, created_at, 0 AS is_current FROM administrators WHERE id = ?",
+    )
+    .bind(result.last_insert_rowid())
+    .fetch_one(&state.db)
+    .await
+    .context("failed to load created administrator")?;
+    Ok(HttpResponse::Created().json(administrator))
 }
 
 pub async fn logout(
@@ -229,7 +304,9 @@ pub fn routes(config: &mut web::ServiceConfig) {
             .route("/status", web::get().to(status))
             .route("/setup", web::post().to(setup))
             .route("/login", web::post().to(login))
-            .route("/logout", web::post().to(logout)),
+            .route("/logout", web::post().to(logout))
+            .route("/administrators", web::get().to(list_administrators))
+            .route("/administrators", web::post().to(create_administrator)),
     );
 }
 
