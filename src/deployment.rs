@@ -51,7 +51,7 @@ impl Status {
 
 #[derive(Clone, FromRow, Serialize)]
 pub struct Deployment {
-    id: String,
+    pub id: String,
     site_id: String,
     commit_sha: Option<String>,
     commit_message: Option<String>,
@@ -88,17 +88,21 @@ pub async fn create(
     site_id: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, true).await?;
-    let site = load_site(&state, &site_id).await?;
+    Ok(HttpResponse::Accepted().json(enqueue(&state, site_id.as_str()).await?))
+}
+
+pub async fn enqueue(state: &web::Data<AppState>, site_id: &str) -> Result<Deployment, ApiError> {
+    let site = load_site(state, site_id).await?;
     let id = Uuid::new_v4().to_string();
     let snapshot = serde_json::to_string(&serde_json::json!({"project_directory":site.project_directory,"mise_tools":site.mise_tools,"install_command":site.install_command,"build_command":site.build_command,"publish_directory":site.publish_directory,"build_enabled":site.build_enabled})).unwrap();
     let config_snapshot: Option<String> =
         sqlx::query_scalar("SELECT config_json FROM site_chimney_configs WHERE site_id = ?")
-            .bind(site_id.as_str())
+            .bind(site_id)
             .fetch_optional(&state.db)
             .await
             .context("failed to snapshot configuration")?;
     let result = sqlx::query("INSERT INTO deployments (id, site_id, status, build_settings_snapshot, config_snapshot) VALUES (?, ?, 'queued', ?, ?)")
-        .bind(&id).bind(site_id.as_str()).bind(snapshot).bind(config_snapshot).execute(&state.db).await;
+        .bind(&id).bind(site_id).bind(snapshot).bind(config_snapshot).execute(&state.db).await;
     if let Err(error) = result {
         if error
             .as_database_error()
@@ -123,7 +127,7 @@ pub async fn create(
         }
     });
     tracing::info!(deployment_id = %id, site_id = %site_id, "deployment queued");
-    Ok(HttpResponse::Accepted().json(get_deployment(&state, &id).await?))
+    get_deployment(state, &id).await
 }
 
 async fn run(state: &AppState, id: &str, site: &SiteBuild) -> Result<()> {

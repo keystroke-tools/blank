@@ -13,6 +13,7 @@ mod repositories;
 mod sites;
 mod state;
 mod web;
+mod webhooks;
 
 use actix_web::{App, HttpResponse, HttpServer, middleware, web as actix_web_data};
 use anyhow::Result;
@@ -81,6 +82,7 @@ async fn main() -> Result<()> {
                     .configure(deployment::routes)
                     .configure(dns::routes)
                     .configure(analytics::routes)
+                    .configure(webhooks::routes)
                     .configure(sites::routes)
                     .route("/health", actix_web_data::get().to(health)),
             )

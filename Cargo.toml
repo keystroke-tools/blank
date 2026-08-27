@@ -12,6 +12,8 @@ chrono = { version = "0.4", features = ["serde"] }
 chimney = { git = "https://github.com/aosasona/chimney", rev = "c01fd6f922850443bf3a13c1b934c7430bc94ca2" }
 dotenvy = "0.15"
 futures-util = "0.3"
+hmac = "0.12"
+hex = "0.4"
 hickory-resolver = "0.26"
 rand = "0.8"
 rust-embed = "8.7"

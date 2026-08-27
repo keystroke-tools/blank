@@ -59,7 +59,7 @@ export function SitePage({ siteId }: { siteId: string }) {
 		queryFn: () => api.analytics(siteId),
 		refetchInterval: 30000,
 	})
-	const [tab, setTab] = useState<'overview' | 'deployments'>('overview')
+	const [tab, setTab] = useState<'overview' | 'deployments'>('deployments')
 	const deploy = useMutation({
 		mutationFn: () =>
 			api.createDeployment(siteId, auth.data?.csrf_token ?? ''),
@@ -151,13 +151,28 @@ export function SitePage({ siteId }: { siteId: string }) {
 							)}
 						</div>
 					</div>
-					<Link
-						to="/sites/$siteId/settings"
-						params={{ siteId }}
-						className="inline-flex h-10 items-center border border-border bg-surface px-4 text-sm font-semibold hover:border-primary"
-					>
-						Project settings
-					</Link>
+					<div className="flex items-center gap-3">
+						<Button
+							onClick={() => {
+								setTab('deployments')
+								void beginDeployment()
+							}}
+							disabled={deploy.isPending || refresh.isPending}
+						>
+							{deploy.isPending
+								? 'Queuing…'
+								: refresh.isPending
+									? 'Checking branch…'
+									: 'Deploy now'}
+						</Button>
+						<Link
+							to="/sites/$siteId/settings"
+							params={{ siteId }}
+							className="inline-flex h-10 items-center border border-border bg-surface px-4 text-sm font-semibold hover:border-primary"
+						>
+							Project settings
+						</Link>
+					</div>
 				</div>
 				<dl className="mt-10 grid border-y border-border sm:grid-cols-2">
 					<Detail

@@ -95,6 +95,8 @@ sudo chmod 0640 /etc/blank.env
 
 `BLANK_EXPECTED_IPS` is a comma-separated list used by domain checks. Set it to the public addresses that should receive site traffic. Keep `BLANK_SECURE_COOKIES=true` when the dashboard is served over HTTPS.
 
+Set `BLANK_WEBHOOK_SECRET` to a random value and configure a GitHub push webhook at `/api/webhooks/github` with the same secret. Pushes matching a site repository and branch are queued automatically when that site has auto-deploy enabled.
+
 ### systemd
 
 Create `/etc/systemd/system/blank.service`:
