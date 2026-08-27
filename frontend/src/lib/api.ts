@@ -115,6 +115,20 @@ export type RepositoryEntry = {
 	path: string
 	kind: 'tree' | 'blob' | string
 }
+export type GitHubStatus = {
+	connected: boolean
+	app_slug: string | null
+	install_url: string | null
+	manifest_url: string | null
+	manifest: string | null
+}
+export type GitHubRepository = {
+	id: number
+	full_name: string
+	clone_url: string
+	private: boolean
+	default_branch: string
+}
 export type Health = {
 	status: string
 	database: string
@@ -180,6 +194,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
 	health: () => request<Health>('/health'),
+	githubStatus: () => request<GitHubStatus>('/github/status'),
+	githubRepositories: () =>
+		request<GitHubRepository[]>('/github/repositories'),
 	authStatus: () => request<AuthStatus>('/auth/status'),
 	setup: (credentials: Credentials) =>
 		request<AuthStatus>('/auth/setup', {

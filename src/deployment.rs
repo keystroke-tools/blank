@@ -132,7 +132,11 @@ pub async fn enqueue(state: &web::Data<AppState>, site_id: &str) -> Result<Deplo
 
 async fn run(state: &AppState, id: &str, site: &SiteBuild) -> Result<()> {
     transition(state, id, Status::Fetching, "Fetching repository").await?;
-    state.git.fetch(&site.id, &site.repository_url).await?;
+    let github_token = crate::github::token_for_repository(state, &site.repository_url).await?;
+    state
+        .git
+        .fetch_with_token(&site.id, &site.repository_url, github_token.as_deref())
+        .await?;
     let commit = state.git.resolve_commit(&site.id, &site.branch).await?;
     sqlx::query(
         "UPDATE deployments SET commit_sha=?, commit_message=?, commit_author=? WHERE id=?",
@@ -750,9 +754,10 @@ pub async fn suggestions(
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, true).await?;
     let site = load_site(&state, &site_id).await?;
+    let token = crate::github::token_for_repository(&state, &site.repository_url).await?;
     state
         .git
-        .fetch(&site.id, &site.repository_url)
+        .fetch_with_token(&site.id, &site.repository_url, token.as_deref())
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let commit = state
@@ -805,9 +810,11 @@ pub async fn draft_suggestions(
     require_session(&req, &state.db, true).await?;
     let cache_id = format!("draft-{}", Uuid::new_v4());
     let result = async {
+        let token =
+            crate::github::token_for_repository(&state, input.repository_url.trim()).await?;
         state
             .git
-            .fetch(&cache_id, input.repository_url.trim())
+            .fetch_with_token(&cache_id, input.repository_url.trim(), token.as_deref())
             .await
             .map_err(|error| ApiError::BadRequest(format!("repository fetch failed: {error}")))?;
         let commit = state

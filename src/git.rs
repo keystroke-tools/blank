@@ -98,9 +98,18 @@ impl GitService {
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn inspect_remote(&self, repository_url: &str) -> Result<RemoteInspection> {
+        self.inspect_remote_with_token(repository_url, None).await
+    }
+
+    pub async fn inspect_remote_with_token(
+        &self,
+        repository_url: &str,
+        token: Option<&str>,
+    ) -> Result<RemoteInspection> {
         validate_repository_url(repository_url)?;
-        let output = run_git(
+        let output = run_git_authenticated(
             self.timeout,
             [
                 OsStr::new("ls-remote"),
@@ -109,12 +118,25 @@ impl GitService {
                 OsStr::new("HEAD"),
                 OsStr::new("refs/heads/*"),
             ],
+            None,
+            &self.keys.join("known_hosts"),
+            token,
         )
         .await?;
         parse_ls_remote(&output)
     }
 
+    #[cfg(test)]
     pub async fn fetch(&self, site_id: &str, repository_url: &str) -> Result<PathBuf> {
+        self.fetch_with_token(site_id, repository_url, None).await
+    }
+
+    pub async fn fetch_with_token(
+        &self,
+        site_id: &str,
+        repository_url: &str,
+        token: Option<&str>,
+    ) -> Result<PathBuf> {
         validate_identifier(site_id)?;
         validate_repository_url(repository_url)?;
         self.prepare().await?;
@@ -152,6 +174,7 @@ impl GitService {
                         .exists()
                         .then(|| self.deploy_key_path(site_id)),
                     &self.keys.join("known_hosts"),
+                    token,
                 )
                 .await?;
                 tokio::fs::rename(&temporary, &repository)
@@ -197,6 +220,7 @@ impl GitService {
                     .exists()
                     .then(|| self.deploy_key_path(site_id)),
                 &self.keys.join("known_hosts"),
+                token,
             )
             .await?;
         }
@@ -431,8 +455,9 @@ async fn fetch_repository(
     repository: &Path,
     deploy_key: Option<PathBuf>,
     known_hosts: &Path,
+    token: Option<&str>,
 ) -> Result<()> {
-    run_git_with_key(
+    run_git_authenticated(
         command_timeout,
         [
             OsStr::new("--git-dir"),
@@ -445,16 +470,18 @@ async fn fetch_repository(
         ],
         deploy_key.as_deref(),
         known_hosts,
+        token,
     )
     .await?;
     Ok(())
 }
 
-async fn run_git_with_key<I, S>(
+async fn run_git_authenticated<I, S>(
     command_timeout: Duration,
     args: I,
     deploy_key: Option<&Path>,
     known_hosts: &Path,
+    token: Option<&str>,
 ) -> Result<String>
 where
     I: IntoIterator<Item = S>,
@@ -472,6 +499,18 @@ where
         .env("GIT_CONFIG_NOSYSTEM", "1");
     if let Some(key) = deploy_key {
         command.env("GIT_SSH_COMMAND", format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}", shell_quote(key), shell_quote(known_hosts)));
+    }
+    if let Some(token) = token {
+        use base64::Engine;
+        let value =
+            base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+        command
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+            .env(
+                "GIT_CONFIG_VALUE_0",
+                format!("Authorization: Basic {value}"),
+            );
     }
     command_output(command_timeout, command).await
 }

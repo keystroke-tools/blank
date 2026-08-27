@@ -111,6 +111,15 @@ export function SiteForm({
 		queryKey: queryKeys.auth,
 		queryFn: api.authStatus,
 	})
+	const github = useQuery({
+		queryKey: ['github-status'],
+		queryFn: api.githubStatus,
+	})
+	const githubRepositories = useQuery({
+		queryKey: ['github-repositories'],
+		queryFn: api.githubRepositories,
+		enabled: github.data?.connected === true,
+	})
 	const inferredName = useRef(site?.name ?? '')
 	const [privateRepository, setPrivateRepository] = useState(false)
 	const [savedMessage, setSavedMessage] = useState<string | null>(null)
@@ -200,6 +209,92 @@ export function SiteForm({
 							this project.
 						</p>
 					</div>
+					{!site && (
+						<div className="border border-border bg-background p-4">
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<div>
+									<p className="text-sm font-semibold">
+										GitHub
+									</p>
+									<p className="mt-1 text-xs text-muted">
+										Connect once to browse private
+										repositories and configure push
+										deployments automatically.
+									</p>
+								</div>
+								{github.data?.connected ? (
+									<a
+										href={github.data.install_url ?? '#'}
+										className="inline-flex h-10 items-center border border-border px-4 text-xs font-semibold hover:border-primary"
+									>
+										Manage repositories
+									</a>
+								) : (
+									<a
+										href="/api/github/connect"
+										className="inline-flex h-10 items-center bg-primary px-4 text-xs font-semibold text-primary-ink"
+									>
+										Connect GitHub
+									</a>
+								)}
+							</div>
+							{github.data?.connected && (
+								<select
+									className="mt-4 h-11 w-full border border-border bg-surface px-3 text-sm"
+									defaultValue=""
+									onChange={(event) => {
+										const repository =
+											githubRepositories.data?.find(
+												(item) =>
+													String(item.id) ===
+													event.target.value,
+											)
+										if (!repository) return
+										form.setFieldValue(
+											'repository_url',
+											repository.clone_url,
+										)
+										form.setFieldValue(
+											'branch',
+											repository.default_branch,
+										)
+										form.setFieldValue(
+											'name',
+											repositoryName(
+												repository.full_name,
+											),
+										)
+										form.setFieldValue('auto_deploy', true)
+										setPrivateRepository(repository.private)
+									}}
+								>
+									<option value="">
+										Select a GitHub repository
+									</option>
+									{githubRepositories.data?.map(
+										(repository) => (
+											<option
+												key={repository.id}
+												value={repository.id}
+											>
+												{repository.full_name}
+												{repository.private
+													? ' (private)'
+													: ''}
+											</option>
+										),
+									)}
+								</select>
+							)}
+							{github.data?.connected &&
+								githubRepositories.data?.length === 0 && (
+									<p className="mt-3 text-xs text-muted">
+										Install the GitHub App on at least one
+										repository, then refresh this page.
+									</p>
+								)}
+						</div>
+					)}
 					<form.Field
 						name="name"
 						validators={{ onBlur: required('Site name', 100) }}

@@ -9,6 +9,7 @@ mod detection;
 mod dns;
 mod error;
 mod git;
+mod github;
 mod repositories;
 mod sites;
 mod state;
@@ -78,6 +79,7 @@ async fn main() -> Result<()> {
                 actix_web_data::scope("/api")
                     .configure(auth::routes)
                     .configure(repositories::routes)
+                    .configure(github::routes)
                     .configure(chimney_config::routes)
                     .configure(deployment::routes)
                     .configure(dns::routes)

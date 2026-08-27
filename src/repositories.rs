@@ -143,9 +143,10 @@ pub async fn inspect(
     input: web::Json<InspectInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_session(&req, &state.db, true).await?;
+    let token = crate::github::token_for_repository(&state, input.repository_url.trim()).await?;
     let inspection = state
         .git
-        .inspect_remote(input.repository_url.trim())
+        .inspect_remote_with_token(input.repository_url.trim(), token.as_deref())
         .await
         .map_err(|error| ApiError::BadRequest(format!("repository inspection failed: {error}")))?;
     Ok(HttpResponse::Ok().json(inspection))
@@ -165,9 +166,10 @@ pub async fn refresh(
     .await
     .context("failed to load site repository")?
     .ok_or_else(|| ApiError::NotFound("site not found".into()))?;
+    let token = crate::github::token_for_repository(&state, &site.repository_url).await?;
     state
         .git
-        .fetch(&id, &site.repository_url)
+        .fetch_with_token(&id, &site.repository_url, token.as_deref())
         .await
         .map_err(|error| ApiError::BadRequest(format!("repository fetch failed: {error}")))?;
     let commit = state
@@ -206,9 +208,10 @@ async fn tree(
     let branch = query.branch.as_deref().unwrap_or(&site.branch);
     if let Err(error) = state.git.list_tree(&id, branch, &query.path).await {
         if error.to_string().contains("cache does not exist") {
+            let token = crate::github::token_for_repository(&state, &site.repository_url).await?;
             state
                 .git
-                .fetch(&id, &site.repository_url)
+                .fetch_with_token(&id, &site.repository_url, token.as_deref())
                 .await
                 .map_err(|error| {
                     ApiError::BadRequest(format!("repository fetch failed: {error}"))

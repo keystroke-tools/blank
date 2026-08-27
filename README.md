@@ -83,6 +83,7 @@ BLANK_MISE_BIN=/usr/local/bin/mise
 BLANK_SECURE_COOKIES=true
 BLANK_RELEASE_RETENTION=5
 BLANK_EXPECTED_IPS=203.0.113.10
+BLANK_PUBLIC_URL=https://blank.example.com
 RUST_LOG=blank=info,actix_web=info
 ```
 
@@ -95,7 +96,9 @@ sudo chmod 0640 /etc/blank.env
 
 `BLANK_EXPECTED_IPS` is a comma-separated list used by domain checks. Set it to the public addresses that should receive site traffic. Keep `BLANK_SECURE_COOKIES=true` when the dashboard is served over HTTPS.
 
-Set `BLANK_WEBHOOK_SECRET` to a random value and configure a GitHub push webhook at `/api/webhooks/github` with the same secret. Pushes matching a site repository and branch are queued automatically when that site has auto-deploy enabled.
+Set `BLANK_PUBLIC_URL` to the externally accessible HTTPS origin of the Blank dashboard. The new-site page can then create a private GitHub App through GitHub's manifest flow. Install that App on selected repositories to browse public and private repositories, fetch them with short-lived installation tokens, and receive signed push events without configuring each repository webhook manually.
+
+For providers or repositories that are not connected through the GitHub App, `BLANK_WEBHOOK_SECRET` still enables the manual GitHub push webhook at `/api/webhooks/github`. Pushes matching a site repository and branch are queued automatically when that site has auto-deploy enabled.
 
 ### systemd
 

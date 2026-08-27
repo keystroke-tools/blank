@@ -11,18 +11,14 @@ pub async fn github(
     state: web::Data<AppState>,
     body: web::Bytes,
 ) -> Result<HttpResponse, ApiError> {
-    if request
+    let event = request
         .headers()
         .get("x-github-event")
         .and_then(|v| v.to_str().ok())
-        != Some("push")
-    {
-        return Ok(HttpResponse::NoContent().finish());
-    }
-    let secret = state
-        .config
-        .webhook_secret
-        .as_deref()
+        .unwrap_or_default();
+    let secret = crate::github::webhook_secret(&state)
+        .await?
+        .or_else(|| state.config.webhook_secret.clone())
         .ok_or(ApiError::NotFound("webhooks are not configured".into()))?;
     let signature = request
         .headers()
@@ -40,6 +36,38 @@ pub async fn github(
         .map_err(|_| ApiError::Forbidden)?;
     let payload: serde_json::Value = serde_json::from_slice(&body)
         .map_err(|_| ApiError::BadRequest("invalid webhook payload".into()))?;
+    if matches!(event, "installation" | "installation_repositories") {
+        let action = payload
+            .get("action")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let installation_id = payload
+            .pointer("/installation/id")
+            .and_then(|value| value.as_i64())
+            .ok_or_else(|| ApiError::BadRequest("installation id is missing".into()))?;
+        if action == "deleted" {
+            sqlx::query("DELETE FROM github_installations WHERE installation_id=?")
+                .bind(installation_id)
+                .execute(&state.db)
+                .await
+                .map_err(anyhow::Error::from)?;
+        } else {
+            let login = payload
+                .pointer("/installation/account/login")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown");
+            let kind = payload
+                .pointer("/installation/account/type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown");
+            sqlx::query("INSERT INTO github_installations (installation_id, account_login, account_type) VALUES (?, ?, ?) ON CONFLICT(installation_id) DO UPDATE SET account_login=excluded.account_login, account_type=excluded.account_type, updated_at=CURRENT_TIMESTAMP")
+                .bind(installation_id).bind(login).bind(kind).execute(&state.db).await.map_err(anyhow::Error::from)?;
+        }
+        return Ok(HttpResponse::NoContent().finish());
+    }
+    if event != "push" {
+        return Ok(HttpResponse::NoContent().finish());
+    }
     if payload
         .get("ref")
         .and_then(|v| v.as_str())
@@ -67,9 +95,10 @@ pub async fn github(
         .and_then(|v| v.strip_prefix("refs/heads/"))
         .unwrap_or_default();
     let site_id: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM sites WHERE repository_url LIKE ? AND branch = ? AND auto_deploy = 1",
+        "SELECT id FROM sites WHERE (repository_url = ? OR repository_url = ?) AND branch = ? AND auto_deploy = 1",
     )
-    .bind(format!("{repository}%"))
+    .bind(repository)
+    .bind(format!("{repository}.git"))
     .bind(branch)
     .fetch_optional(&state.db)
     .await

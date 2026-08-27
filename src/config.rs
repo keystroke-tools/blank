@@ -19,6 +19,7 @@ pub struct Config {
     pub expected_ips: Vec<IpAddr>,
     pub mise_bin: Option<PathBuf>,
     pub webhook_secret: Option<String>,
+    pub public_url: Option<String>,
 }
 
 impl Config {
@@ -75,6 +76,10 @@ impl Config {
         let webhook_secret = env::var("BLANK_WEBHOOK_SECRET")
             .ok()
             .filter(|v| !v.is_empty());
+        let public_url = env::var("BLANK_PUBLIC_URL")
+            .ok()
+            .map(|value| value.trim_end_matches('/').to_owned())
+            .filter(|value| !value.is_empty());
         if chimney_https_port.is_some() && chimney_acme_email.is_none() {
             anyhow::bail!("BLANK_CHIMNEY_ACME_EMAIL is required when Chimney HTTPS is enabled");
         }
@@ -90,6 +95,7 @@ impl Config {
             expected_ips,
             mise_bin,
             webhook_secret,
+            public_url,
         })
     }
 }

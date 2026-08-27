@@ -251,9 +251,10 @@ async fn repository_file(
     id: &str,
 ) -> Result<(SiteSource, String, Option<Vec<u8>>), ApiError> {
     let source = site_source(state, id).await?;
+    let token = crate::github::token_for_repository(state, &source.repository_url).await?;
     state
         .git
-        .fetch(id, &source.repository_url)
+        .fetch_with_token(id, &source.repository_url, token.as_deref())
         .await
         .map_err(|error| ApiError::BadRequest(format!("repository fetch failed: {error}")))?;
     let commit = state
