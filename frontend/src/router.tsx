@@ -15,6 +15,7 @@ import { NewSite } from './routes/NewSite'
 import { DeploymentPage, SitePage, SiteSettings } from './routes/SitePage'
 import { SiteConfiguration } from './routes/SiteConfiguration'
 import { SiteAnalytics } from './routes/SiteAnalytics'
+import { Docs, Landing } from './routes/Landing'
 
 function Root() {
 	const auth = useQuery({
@@ -55,10 +56,17 @@ const indexRoute = createRoute({
 			queryKey: queryKeys.auth,
 			queryFn: api.authStatus,
 		})
-		if (data?.setup_required) return <Navigate to="/setup" />
-		if (!data?.authenticated) return <Navigate to="/login" />
-		return <Dashboard />
+		return data?.authenticated ? (
+			<Dashboard />
+		) : (
+			<Landing setupRequired={Boolean(data?.setup_required)} />
+		)
 	},
+})
+const docsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/docs',
+	component: Docs,
 })
 const setupRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -163,6 +171,7 @@ const deploymentRoute = createRoute({
 export const router = createRouter({
 	routeTree: rootRoute.addChildren([
 		indexRoute,
+		docsRoute,
 		setupRoute,
 		loginRoute,
 		newSiteRoute,

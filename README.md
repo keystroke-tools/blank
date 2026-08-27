@@ -8,6 +8,8 @@ Blank was developed with assistance from large language models. Blank does not s
 
 Blank is not a container platform, a general-purpose PaaS, or a CI system.
 
+Unauthenticated visitors see a compact landing page at `/`, with introductory documentation available at `/docs`. Signed-in administrators continue directly to the site dashboard.
+
 ## Development
 
 Requirements: Rust, Node, and pnpm. Mise can install the pinned development tools.
